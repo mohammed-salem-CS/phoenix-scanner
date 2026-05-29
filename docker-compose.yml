@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  phoenix-backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongo
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/phoenixDB
+      - JWT_SECRET=phoenix_docker_secret
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:

@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="Phoenix — Next-Generation Automated Web Vulnerability Scanner. Identify security threats with advanced scanning technology.">
+    <title>Phoenix — Web Vulnerability Scanner</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="#" class="logo-container" onclick="switchView('home')">
+                <img src="logo.png" alt="Phoenix Logo" class="logo-img">
+                <span class="logo-text">Phoenix</span>
+            </a>
+            <button class="hamburger" onclick="toggleMobileMenu()" aria-label="Toggle navigation">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="nav-links">
+                <a id="themeToggle" class="theme-toggle-btn" title="Toggle Dark/Light Mode"
+                    style="font-size: 1.1rem; color: var(--accent-yellow);">
+                    <i class="fas fa-moon"></i>
+                </a>
+                <a onclick="switchView('home')" id="nav-home" class="active">
+                    <i class="fas fa-crosshairs"></i> Scan
+                </a>
+                <a onclick="switchView('dashboard')" id="nav-dashboard">
+                    <i class="fas fa-chart-pie"></i> Dashboard
+                </a>
+                <a onclick="switchView('history')" id="nav-history">
+                    <i class="fas fa-clock-rotate-left"></i> History
+                </a>
+                <a onclick="switchView('admin')" id="nav-admin" style="display:none; color: var(--danger-red);">
+                    <i class="fas fa-shield-halved"></i> Admin
+                </a>
+                <a onclick="switchView('account')" id="nav-account">
+                    <i class="fas fa-user-circle"></i> Account / Login
+                </a>
+                <a onclick="logout()" id="nav-logout" style="display:none; color: var(--danger-red);">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container">
+
+        <!-- ========== HOME / SCAN VIEW ========== -->
+        <section id="view-home" class="view-section active">
+            <div class="card scan-hero">
+                <h1>Phoenix Scanner</h1>
+                <p>Next-Gen Automated Web Vulnerability Assessment</p>
+
+                <div class="scan-bar">
+                    <input type="url" id="scanUrl" placeholder="Enter Target URL (e.g., https://example.com)">
+                    <button id="startScanBtn" onclick="startScan()"><i class="fas fa-bolt" style="margin-right:6px;"></i>Start
+                        Scan</button>
+                    <button id="cancelScanBtn" onclick="cancelScan()" style="display:none; background: var(--danger-red); border-color: var(--danger-red);"><i class="fas fa-times" style="margin-right:6px;"></i>Cancel</button>
+                </div>
+
+                <!-- Advanced Options -->
+                <div style="margin-top: 1rem; text-align: left; padding: 0 1rem;">
+                    <a href="#" onclick="toggleAdvancedOptions(); return false;" style="color: var(--primary-orange); font-size: 0.9rem; text-decoration: none;">
+                        <i class="fas fa-user-lock"></i> Auto-Login Settings
+                    </a>
+                    <div id="advancedOptions" style="display: none; margin-top: 0.8rem; background: rgba(0,0,0,0.05); padding: 1rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <p style="font-size: 0.85rem; color: var(--light-text); margin-bottom: 1rem;">If the target site requires authentication, enter the credentials below. The scanner will automatically detect the login form and authenticate before scanning.</p>
+                        
+                        <div style="display: flex; gap: 1rem;">
+                            <div style="flex: 1;">
+                                <label style="font-size: 0.85rem; font-weight: 600; display: block; margin-bottom: 0.4rem;">Target Username</label>
+                                <input type="text" id="targetUsername" placeholder="e.g., admin" style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); color: var(--text-color);">
+                            </div>
+                            <div style="flex: 1;">
+                                <label style="font-size: 0.85rem; font-weight: 600; display: block; margin-bottom: 0.4rem;">Target Password</label>
+                                <input type="password" id="targetPassword" placeholder="e.g., password" style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); color: var(--text-color);">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scan Mode Selector -->
+                <div class="scan-mode-selector" id="scanModeSelector">
+                    <button class="scan-mode-btn active" id="modeScript" onclick="setScanMode('script')">
+                        <i class="fas fa-terminal"></i>
+                        <span>Script Engine</span>
+                        <small>Deep crawling & payload testing</small>
+                    </button>
+                    <button class="scan-mode-btn" id="modeAI" onclick="setScanMode('ai')">
+                        <i class="fas fa-robot"></i>
+                        <span>AI Agent</span>
+                        <small>AI-powered analysis</small>
+                    </button>
+                    <button class="scan-mode-btn" id="modeHybrid" onclick="setScanMode('hybrid')">
+                        <i class="fas fa-atom"></i>
+                        <span>Hybrid</span>
+                        <small>AI + Phoenix Engine</small>
+                    </button>
+                </div>
+                <div class="progress-container" id="progressArea">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                        <span style="font-weight:600; display:flex; align-items:center;">
+                            <span class="pulse-dot"></span> Scanning Target...
+                        </span>
+                        <span id="percentText" style="font-weight:600; color:var(--primary-orange);">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-fill" id="progressBar"></div>
+                    </div>
+                    <p class="status-update" id="statusText">Initializing engines...</p>
+                </div>
+            </div>
+
+            <!-- Scan Results -->
+            <div id="resultsArea" class="card" style="display:none;">
+                <div>
+                    <h2><i class="fas fa-file-shield" style="color:var(--primary-orange); margin-right:8px;"></i>Scan
+                        Results</h2>
+                    <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+                        <button class="tool-btn" onclick="downloadPDF()">Download PDF</button>
+                        <button class="tool-btn ai-report-btn" id="aiReportBtnHome"
+                            onclick="generateAIReportFromScan()">
+                            <i class="fas fa-robot" style="margin-right:4px;"></i>AI Report
+                        </button>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background:#FDE2E2; color:var(--critical-darkred);">
+                            <i class="fas fa-skull-crossbones"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h4>Critical Risk</h4>
+                            <div class="count" style="color:var(--critical-darkred);">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon icon-red"><i class="fas fa-bug"></i></div>
+                        <div class="stat-info">
+                            <h4>High Risk</h4>
+                            <div class="count" style="color:var(--danger-red);">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon icon-orange"><i class="fas fa-exclamation-triangle"></i></div>
+                        <div class="stat-info">
+                            <h4>Medium Risk</h4>
+                            <div class="count" style="color:var(--accent-yellow);">0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="styled-table">
+                        <thead>
+                            <tr>
+                                <th><i class="fas fa-bug" style="margin-right:6px;"></i>Vulnerability</th>
+                                <th><i class="fas fa-gauge-high" style="margin-right:6px;"></i>Severity</th>
+                                <th><i class="fas fa-location-dot" style="margin-right:6px;"></i>Location</th>
+                                <th><i class="fas fa-eye" style="margin-right:6px;"></i>Evidence</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== DASHBOARD VIEW ========== -->
+        <section id="view-dashboard" class="view-section">
+            <h2><i class="fas fa-chart-pie" style="color:var(--primary-orange); margin-right:8px;"></i>Security Overview
+            </h2>
+            <p>Global statistics for all your monitored assets.</p>
+
+            <div class="dashboard-grid">
+                <div class="stat-card">
+                    <div class="stat-icon icon-orange"><i class="fas fa-globe"></i></div>
+                    <div class="stat-info">
+                        <h4>Sites Monitored</h4>
+                        <div class="number">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:#FDE2E2; color:var(--critical-darkred);">
+                        <i class="fas fa-skull-crossbones"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Critical Vulns</h4>
+                        <div class="number" style="color:var(--critical-darkred);">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon icon-red"><i class="fas fa-shield-alt"></i></div>
+                    <div class="stat-info">
+                        <h4>High Vulns</h4>
+                        <div class="number">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon icon-orange"><i class="fas fa-exclamation-triangle"></i></div>
+                    <div class="stat-info">
+                        <h4>Medium Vulns</h4>
+                        <div class="number">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1rem;">
+                    <h3><i class="fas fa-chart-line"
+                            style="color:var(--primary-orange); margin-right:8px;"></i>Vulnerability Trends
+                    </h3>
+                    <div class="trend-period-selector" id="trendPeriodSelector">
+                        <button class="trend-period-btn" onclick="loadTrendChart(7)" data-days="7">7 Days</button>
+                        <button class="trend-period-btn active" onclick="loadTrendChart(30)" data-days="30">30 Days</button>
+                        <button class="trend-period-btn" onclick="loadTrendChart(60)" data-days="60">60 Days</button>
+                        <button class="trend-period-btn" onclick="loadTrendChart(90)" data-days="90">90 Days</button>
+                    </div>
+                </div>
+                <div class="chart-container" style="position: relative; height:300px; width:100%;">
+                    <canvas id="vulnChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== HISTORY VIEW ========== -->
+        <section id="view-history" class="view-section">
+            <h2><i class="fas fa-clock-rotate-left" style="color:var(--primary-orange); margin-right:8px;"></i>Scan
+                History</h2>
+            <p>View and manage all your previous vulnerability scans.</p>
+
+            <!-- Filter Bar (Feature #4) -->
+            <div class="history-filter-bar" id="historyFilterBar">
+                <input type="text" class="filter-input" id="filterSearch" placeholder="Search by URL..." />
+                <select class="filter-select" id="filterSeverity">
+                    <option value="">All Severities</option>
+                    <option value="Critical">Critical</option>
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                    <option value="Info">Info</option>
+                </select>
+                <select class="filter-select" id="filterMode">
+                    <option value="">All Modes</option>
+                    <option value="script">Script Engine</option>
+                    <option value="ai">AI Agent</option>
+                    <option value="hybrid">Hybrid</option>
+                </select>
+                <input type="date" class="filter-input" id="filterDateFrom" style="min-width:140px; flex:none;" />
+                <input type="date" class="filter-input" id="filterDateTo" style="min-width:140px; flex:none;" />
+                <button class="filter-btn filter-btn-primary" onclick="applyHistoryFilters()">
+                    <i class="fas fa-search" style="margin-right:4px;"></i>Search
+                </button>
+                <button class="filter-btn filter-btn-secondary" onclick="clearHistoryFilters()">
+                    <i class="fas fa-times" style="margin-right:4px;"></i>Clear
+                </button>
+            </div>
+
+            <!-- Compare Bar (Feature #1) -->
+            <div class="compare-bar" id="compareBar">
+                <i class="fas fa-code-compare" style="font-size:1.1rem;"></i>
+                <span>Selected <span class="compare-count" id="compareCount">0</span>/2 scans for comparison</span>
+                <button class="filter-btn filter-btn-primary" id="compareBtn" onclick="compareSelectedScans()" disabled>
+                    <i class="fas fa-code-compare" style="margin-right:4px;"></i>Compare
+                </button>
+                <button class="filter-btn filter-btn-secondary" onclick="clearCompareSelection()">
+                    Cancel
+                </button>
+            </div>
+
+            <div class="card">
+                <div class="table-container">
+                    <table class="styled-table">
+                        <thead>
+                            <tr>
+                                <th style="width:40px;"><i class="fas fa-code-compare" style="margin-right:4px;" title="Select to compare"></i></th>
+                                <th><i class="fas fa-calendar" style="margin-right:4px;"></i>Date</th>
+                                <th><i class="fas fa-globe" style="margin-right:4px;"></i>Target URL</th>
+                                <th><i class="fas fa-stopwatch" style="margin-right:4px;"></i>Duration</th>
+                                <th><i class="fas fa-bug" style="margin-right:4px;"></i>Issues Found</th>
+                                <th><i class="fas fa-circle-check" style="margin-right:4px;"></i>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== SCAN DETAIL VIEW ========== -->
+        <section id="view-scan-detail" class="view-section">
+            <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap;">
+                <button class="save-btn" onclick="switchView('history')"
+                    style="padding:0.55rem 1.2rem; font-size:0.85rem;">
+                    <i class="fas fa-arrow-left" style="margin-right:6px;"></i>Back to History
+                </button>
+                <h2 style="margin:0;"><i class="fas fa-file-shield"
+                        style="color:var(--primary-orange); margin-right:8px;"></i>Scan Report</h2>
+            </div>
+
+            <!-- Scan Meta Info -->
+            <div class="card" id="scanDetailMeta">
+                <div class="scan-detail-header">
+                    <div class="scan-detail-info">
+                        <div class="scan-detail-row">
+                            <span class="scan-detail-label"><i class="fas fa-globe"></i> Target</span>
+                            <span class="scan-detail-value" id="detailTargetUrl">—</span>
+                        </div>
+                        <div class="scan-detail-row">
+                            <span class="scan-detail-label"><i class="fas fa-calendar"></i> Scan Date</span>
+                            <span class="scan-detail-value" id="detailScanDate">—</span>
+                        </div>
+                        <div class="scan-detail-row">
+                            <span class="scan-detail-label"><i class="fas fa-stopwatch"></i> Duration</span>
+                            <span class="scan-detail-value" id="detailDuration">—</span>
+                        </div>
+                        <div class="scan-detail-row">
+                            <span class="scan-detail-label"><i class="fas fa-circle-check"></i> Status</span>
+                            <span class="scan-detail-value" id="detailStatus">—</span>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+                        <button class="tool-btn" onclick="downloadDetailPDF()">Download PDF</button>
+                        <div class="export-dropdown" id="exportDropdown">
+                            <button class="tool-btn" onclick="toggleExportDropdown()" style="background:#4B5563;">
+                                <i class="fas fa-file-export" style="margin-right:4px;"></i>Export
+                            </button>
+                            <div class="export-dropdown-content">
+                                <a onclick="exportScanData('json')"><i class="fas fa-file-code" style="color:#3B82F6;"></i>Export as JSON</a>
+                                <a onclick="exportScanData('csv')"><i class="fas fa-file-csv" style="color:#10B981;"></i>Export as CSV</a>
+                            </div>
+                        </div>
+                        <button class="tool-btn ai-report-btn" id="aiReportBtnDetail"
+                            onclick="generateAIReportFromDetail()">
+                            <i class="fas fa-robot" style="margin-right:4px;"></i>AI Report
+                        </button>
+                        <button class="tool-btn" id="downloadLogsBtn" onclick="downloadAgentLogs()" style="display: none; background: #4B5563;">
+                            <i class="fas fa-terminal" style="margin-right:4px;"></i>Download Logs
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Severity Summary -->
+            <div class="dashboard-grid" id="detailStatsGrid">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:#FDE2E2; color:var(--critical-darkred);">
+                        <i class="fas fa-skull-crossbones"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Critical</h4>
+                        <div class="count" id="detailCritical" style="color:var(--critical-darkred);">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon icon-red"><i class="fas fa-bug"></i></div>
+                    <div class="stat-info">
+                        <h4>High</h4>
+                        <div class="count" id="detailHigh" style="color:var(--danger-red);">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon icon-orange"><i class="fas fa-exclamation-triangle"></i></div>
+                    <div class="stat-info">
+                        <h4>Medium</h4>
+                        <div class="count" id="detailMedium" style="color:var(--accent-yellow);">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:#DBEAFE; color:#3B82F6;">
+                        <i class="fas fa-info-circle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Low / Info</h4>
+                        <div class="count" id="detailLow" style="color:#3B82F6;">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Discovery Data -->
+            <div class="dashboard-grid" id="discoveryStatsGrid" style="margin-bottom: 1.5rem;">
+                <div class="card" style="flex: 1;">
+                    <h3><i class="fas fa-network-wired" style="color:var(--primary-orange); margin-right:8px;"></i>Endpoints & Parameters</h3>
+                    <ul id="detailEndpointsList" style="list-style-type: none; padding: 0; max-height: 200px; overflow-y: auto; font-size: 0.9rem; color: var(--light-text);">
+                        <!-- populated by JS -->
+                    </ul>
+                </div>
+                <div class="card" style="flex: 1;">
+                    <h3><i class="fas fa-server" style="color:var(--primary-orange); margin-right:8px;"></i>Technologies & Info</h3>
+                    <ul id="detailTechnologiesList" style="list-style-type: none; padding: 0; max-height: 200px; overflow-y: auto; font-size: 0.9rem; color: var(--light-text);">
+                        <!-- populated by JS -->
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Vulnerability Table -->
+            <div class="card">
+                <h3 style="margin-bottom:1rem;">
+                    <i class="fas fa-list-check" style="color:var(--primary-orange); margin-right:8px;"></i>
+                    Vulnerabilities Found
+                    <span id="detailVulnCount"
+                        style="font-weight:400; font-size:0.9rem; color:var(--light-text); margin-left:8px;">(0)</span>
+                </h3>
+                <div class="table-container">
+                    <table class="styled-table" id="detailVulnTable">
+                        <thead>
+                            <tr>
+                                <th style="width:40px;">#</th>
+                                <th><i class="fas fa-bug" style="margin-right:6px;"></i>Vulnerability</th>
+                                <th><i class="fas fa-gauge-high" style="margin-right:6px;"></i>Severity</th>
+                                <th><i class="fas fa-location-dot" style="margin-right:6px;"></i>Location</th>
+                                <th><i class="fas fa-align-left" style="margin-right:6px;"></i>Description</th>
+                                <th><i class="fas fa-eye" style="margin-right:6px;"></i>Evidence</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== ADMIN VIEW ========== -->
+        <section id="view-admin" class="view-section">
+            <h2><i class="fas fa-shield-halved" style="color:var(--primary-orange); margin-right:8px;"></i>Admin
+                Dashboard</h2>
+            <p>System Overview & User Management</p>
+
+            <div class="dashboard-grid">
+                <div class="stat-card">
+                    <div class="stat-icon icon-orange"><i class="fas fa-users"></i></div>
+                    <div class="stat-info">
+                        <h4>Total Users</h4>
+                        <div class="number" id="adminTotalUsers">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon icon-green"><i class="fas fa-satellite-dish"></i></div>
+                    <div class="stat-info">
+                        <h4>Global Scans</h4>
+                        <div class="number" id="adminTotalScans">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 1rem;">
+                <h3><i class="fas fa-users-gear" style="color:var(--primary-orange); margin-right:8px;"></i>User
+                    Management</h3>
+                <div class="table-container" style="margin-top:1rem;">
+                    <table class="styled-table" id="adminUsersTable">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Joined Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== ACCOUNT VIEW ========== -->
+        <section id="view-account" class="view-section">
+            <h2><i class="fas fa-user-gear" style="color:var(--primary-orange); margin-right:8px;"></i>Account Settings
+            </h2>
+            <p>Manage your profile and security settings.</p>
+            <div class="account-layout">
+                <div class="sidebar-menu">
+                    <div class="active-tab"><i class="fas fa-user"></i> Profile Information</div>
+                    <div><i class="fas fa-crown"></i> Subscription Plan</div>
+                    <div><i class="fas fa-bell"></i> Notifications</div>
+                    <div style="color:var(--danger-red);" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout
+                    </div>
+                </div>
+
+                <div>
+                    <div class="card">
+                        <h3><i class="fas fa-id-card" style="color:var(--primary-orange); margin-right:8px;"></i>Profile
+                            Details</h3>
+                        <form onsubmit="event.preventDefault();" style="margin-top:1rem;">
+                            <div class="form-group">
+                                <label><i class="fas fa-envelope"
+                                        style="margin-right:6px; color:var(--light-text);"></i>Email Address</label>
+                                <input type="email" id="profileEmail" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-user-tag"
+                                        style="margin-right:6px; color:var(--light-text);"></i>Role</label>
+                                <input type="text" id="profileRole" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-calendar-check"
+                                        style="margin-right:6px; color:var(--light-text);"></i>Member Since</label>
+                                <input type="text" id="profileJoined" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-chart-bar"
+                                        style="margin-right:6px; color:var(--light-text);"></i>Total Scans Run</label>
+                                <input type="text" id="profileScanCount" readonly>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3><i class="fas fa-key" style="color:var(--primary-orange); margin-right:8px;"></i>Change
+                            Password</h3>
+                        <form onsubmit="event.preventDefault(); changePassword();" style="margin-top:1rem;">
+                            <div class="form-group">
+                                <label>Current Password</label>
+                                <input type="password" id="currentPassword" required
+                                    placeholder="Enter current password">
+                            </div>
+                            <div class="form-group">
+                                <label>New Password</label>
+                                <input type="password" id="newPassword" required
+                                    placeholder="Enter new password (min 6 chars)">
+                            </div>
+                            <button type="submit" class="save-btn">
+                                <i class="fas fa-check" style="margin-right:6px;"></i>Update Password
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== LOGIN VIEW ========== -->
+        <section id="view-login" class="view-section">
+            <div class="card">
+                <div id="loginContainer">
+                    <h2>Welcome Back</h2>
+                    <p>Login to access Phoenix Scanner</p>
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label><i class="fas fa-envelope"
+                                    style="margin-right:6px; color:var(--light-text);"></i>Email</label>
+                            <input type="email" id="loginEmail" required placeholder="you@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-lock"
+                                    style="margin-right:6px; color:var(--light-text);"></i>Password</label>
+                            <input type="password" id="loginPassword" required placeholder="••••••••">
+                        </div>
+                        <button type="submit" class="save-btn">
+                            <i class="fas fa-sign-in-alt" style="margin-right:6px;"></i>Login
+                        </button>
+                    </form>
+                    <p class="auth-toggle">
+                        New user? <a href="#" onclick="toggleAuth('signup')">Create account</a>
+                    </p>
+                </div>
+
+                <div id="signupContainer" style="display: none;">
+                    <h2>Create Account</h2>
+                    <p>Join Phoenix Security Team</p>
+                    <form id="signupForm">
+                        <div class="form-group">
+                            <label><i class="fas fa-envelope"
+                                    style="margin-right:6px; color:var(--light-text);"></i>Email</label>
+                            <input type="email" id="signupEmail" required placeholder="you@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-lock"
+                                    style="margin-right:6px; color:var(--light-text);"></i>Password</label>
+                            <input type="password" id="signupPassword" required placeholder="Min 6 characters">
+                        </div>
+                        <button type="submit" class="save-btn">
+                            <i class="fas fa-user-plus" style="margin-right:6px;"></i>Sign Up
+                        </button>
+                    </form>
+                    <p class="auth-toggle">
+                        Already have an account? <a href="#" onclick="toggleAuth('login')">Login</a>
+                    </p>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- Compare section is below, before </main> -->
+
+        <section id="view-compare" class="view-section">
+            <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap;">
+                <button class="save-btn" onclick="switchView('history')" style="padding:0.55rem 1.2rem; font-size:0.85rem;">
+                    <i class="fas fa-arrow-left" style="margin-right:6px;"></i>Back to History
+                </button>
+                <h2 style="margin:0;"><i class="fas fa-code-compare" style="color:var(--primary-orange); margin-right:8px;"></i>Scan Comparison</h2>
+            </div>
+
+            <!-- Scan Meta Comparison -->
+            <div class="card" id="compareMeta">
+                <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:1rem; align-items:center;">
+                    <div id="compareScan1Meta" style="text-align:center;">
+                        <h4 style="color:var(--light-text); text-transform:uppercase; font-size:0.8rem; letter-spacing:0.5px;">Scan A (Older)</h4>
+                        <p style="font-weight:600; margin:0;" id="compareScan1Info">—</p>
+                    </div>
+                    <div style="text-align:center;">
+                        <i class="fas fa-arrows-left-right" style="font-size:1.5rem; color:var(--primary-orange);"></i>
+                    </div>
+                    <div id="compareScan2Meta" style="text-align:center;">
+                        <h4 style="color:var(--light-text); text-transform:uppercase; font-size:0.8rem; letter-spacing:0.5px;">Scan B (Newer)</h4>
+                        <p style="font-weight:600; margin:0;" id="compareScan2Info">—</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Comparison Summary -->
+            <div class="compare-summary" id="compareSummaryCards">
+                <div class="compare-stat compare-stat-new">
+                    <div class="compare-stat-number" id="compareNewCount">0</div>
+                    <div class="compare-stat-label"><i class="fas fa-plus-circle"></i> New Vulnerabilities</div>
+                </div>
+                <div class="compare-stat compare-stat-fixed">
+                    <div class="compare-stat-number" id="compareFixedCount">0</div>
+                    <div class="compare-stat-label"><i class="fas fa-check-circle"></i> Fixed / Remediated</div>
+                </div>
+                <div class="compare-stat compare-stat-persistent">
+                    <div class="compare-stat-number" id="comparePersistentCount">0</div>
+                    <div class="compare-stat-label"><i class="fas fa-exclamation-circle"></i> Persistent</div>
+                </div>
+            </div>
+
+            <!-- Comparison Tables -->
+            <div class="card" id="compareResults">
+                <!-- New Vulnerabilities -->
+                <div class="compare-section-title new-section">
+                    <i class="fas fa-plus-circle"></i> New Vulnerabilities (appeared in newer scan)
+                </div>
+                <div class="table-container">
+                    <table class="styled-table" id="compareNewTable">
+                        <thead>
+                            <tr>
+                                <th>Type</th><th>Severity</th><th>Location</th><th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <!-- Fixed Vulnerabilities -->
+                <div class="compare-section-title fixed-section" style="margin-top:1.5rem;">
+                    <i class="fas fa-check-circle"></i> Fixed Vulnerabilities (remediated since older scan)
+                </div>
+                <div class="table-container">
+                    <table class="styled-table" id="compareFixedTable">
+                        <thead>
+                            <tr>
+                                <th>Type</th><th>Severity</th><th>Location</th><th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <!-- Persistent Vulnerabilities -->
+                <div class="compare-section-title persistent-section" style="margin-top:1.5rem;">
+                    <i class="fas fa-exclamation-circle"></i> Persistent Vulnerabilities (still present)
+                </div>
+                <div class="table-container">
+                    <table class="styled-table" id="comparePersistentTable">
+                        <thead>
+                            <tr>
+                                <th>Type</th><th>Severity</th><th>Location</th><th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <div class="container footer-content">
+            <div class="footer-brand">
+                <i class="fas fa-fire-flame-curved"></i>
+                <span>Phoenix Scanner</span>
+            </div>
+            <p class="footer-text">&copy; 2026 Phoenix Security. All rights reserved.</p>
+            <div class="footer-links">
+                <a href="#">Privacy</a>
+                <a href="#">Terms</a>
+                <a href="#">Docs</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
