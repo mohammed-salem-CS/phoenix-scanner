@@ -715,6 +715,26 @@
         </div>
     </footer>
 
+
+    <!-- Vulnerability Detail Modal -->
+    <div class="vuln-modal-overlay" id="vulnDetailModal">
+        <div class="vuln-modal" role="dialog" aria-modal="true" aria-labelledby="vulnModalTitle">
+            <div class="vuln-modal-accent" id="vulnModalAccent"></div>
+            <div class="vuln-modal-header">
+                <div class="vuln-modal-header-left">
+                    <div class="vuln-modal-title" id="vulnModalTitle"></div>
+                    <div class="vuln-modal-meta" id="vulnModalMeta"></div>
+                </div>
+                <button class="vuln-modal-close" onclick="closeVulnModal()" aria-label="Close modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="vuln-modal-body" id="vulnModalBody">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 

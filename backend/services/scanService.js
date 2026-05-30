@@ -8,6 +8,7 @@
 const Scan = require('../models/Scan');
 const { executeScan } = require('./scanStrategies');
 const { VALID_SEVERITIES, VALID_SCAN_MODES } = require('../config');
+const { registerScan, unregisterScan } = require('./scanRegistry');
 
 /**
  * Build authentication options from request body fields.
@@ -75,6 +76,10 @@ async function runAndPersistScan(url, scanMode, authOptions, userEmail, io, sock
     const mode = VALID_SCAN_MODES.includes(scanMode) ? scanMode : 'script';
     const startTime = Date.now();
 
+    // Create an AbortController so this scan can be canceled
+    const abortController = new AbortController();
+    registerScan(url, abortController, mode);
+
     // Helper to emit progress to the specific client
     const emitProgress = (phase, message, percent) => {
         if (io && socketId) {
@@ -84,11 +89,35 @@ async function runAndPersistScan(url, scanMode, authOptions, userEmail, io, sock
 
     emitProgress('init', `Starting ${mode} scan for ${url}...`, 5);
 
-    // Execute via strategy pattern
-    const scanResult = await executeScan(mode, url, authOptions, emitProgress);
+    let scanResult;
+    try {
+        // Execute via strategy pattern — pass AbortController signal
+        scanResult = await executeScan(mode, url, authOptions, emitProgress, abortController.signal);
+    } catch (execErr) {
+        unregisterScan(url);
+        // If aborted, return a clean "canceled" response instead of an error
+        if (abortController.signal.aborted) {
+            emitProgress('canceled', 'Scan was canceled by user.', 100);
+            return {
+                scanResult: {
+                    target: url,
+                    timestamp: new Date(),
+                    vulnerabilities: [],
+                    aiAnalysis: 'Scan was canceled by user.'
+                },
+                scanId: null,
+                mode,
+                duration: '0m 0s',
+                canceled: true
+            };
+        }
+        throw execErr;
+    }
 
     const durationMs = Date.now() - startTime;
     const duration = `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`;
+
+    unregisterScan(url);
 
     emitProgress('saving', 'Saving results to database...', 95);
 

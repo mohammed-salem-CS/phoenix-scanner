@@ -6,6 +6,7 @@
 // 0a. Socket.IO Real-Time Connection (Feature #2)
 // -----------------------------------------------
 let phoenixSocket = null;
+let _scanProgressHighWaterMark = 0; // Tracks the highest progress value to prevent regression
 
 function initSocket() {
     if (phoenixSocket) return phoenixSocket;
@@ -18,14 +19,28 @@ function initSocket() {
             console.log('[Phoenix] Socket.IO disconnected');
         });
         // Real-time scan progress handler
+        // Only updates the UI if the incoming percent is HIGHER than the current value
+        // to prevent the progress bar from jumping backwards when the local animation
+        // is ahead of the backend's reported progress.
         phoenixSocket.on('scan:progress', (data) => {
             const progressBar = document.getElementById('progressBar');
             const percentText = document.getElementById('percentText');
             const statusText = document.getElementById('statusText');
+
             if (progressBar && data.percent !== undefined) {
-                progressBar.style.width = data.percent + '%';
-                percentText.innerText = data.percent + '%';
+                // Enforce monotonically increasing progress
+                if (data.percent > _scanProgressHighWaterMark) {
+                    _scanProgressHighWaterMark = data.percent;
+                    progressBar.style.width = data.percent + '%';
+                    percentText.innerText = Math.round(data.percent) + '%';
+
+                    // Sync the local animation tracker so it doesn't fall behind
+                    if (typeof window._scanLocalProgress !== 'undefined') {
+                        window._scanLocalProgress = Math.max(window._scanLocalProgress, data.percent);
+                    }
+                }
             }
+            // Always update status text from backend (more accurate phase info)
             if (statusText && data.message) {
                 statusText.innerText = data.message;
             }
@@ -191,6 +206,10 @@ async function startScan() {
             ? 'Initializing Phoenix Hybrid Scanner...'
             : 'Initializing Phoenix Engine...';
 
+    // Reset progress tracking for this scan
+    _scanProgressHighWaterMark = 0;
+    window._scanLocalProgress = 0;
+
     const modeLabel = selectedScanMode === 'ai' ? '🤖 AI Agent' : selectedScanMode === 'hybrid' ? '⚛️ Hybrid' : '⚡ Script Engine';
     showToast(`${modeLabel} scan initiated for ${url}`, 'info', 3000);
 
@@ -241,9 +260,19 @@ async function startScan() {
         if (currentProgress < 85) {
             const increment = currentProgress < 30 ? 0.8 : currentProgress < 60 ? 0.5 : 0.3;
             currentProgress = Math.min(85, currentProgress + increment);
+
+            // Sync with any Socket.IO updates that may have jumped ahead
+            currentProgress = Math.max(currentProgress, window._scanLocalProgress || 0);
+            window._scanLocalProgress = currentProgress;
+
             const rounded = Math.round(currentProgress);
-            progressBar.style.width = rounded + '%';
-            percentText.innerText = rounded + '%';
+
+            // Only update DOM if this is actually higher than what's displayed
+            if (rounded > _scanProgressHighWaterMark) {
+                _scanProgressHighWaterMark = rounded;
+                progressBar.style.width = rounded + '%';
+                percentText.innerText = rounded + '%';
+            }
 
             for (const msg of statusMessages) {
                 if (rounded >= msg.at && rounded < msg.at + 3) {
@@ -293,7 +322,15 @@ async function startScan() {
         document.getElementById('startScanBtn').style.display = 'inline-block';
         document.getElementById('cancelScanBtn').style.display = 'none';
 
-        if (result.status === 'success') {
+        if (result.status === 'canceled') {
+            // Scan was canceled by user
+            progressBar.style.width = '0%';
+            percentText.innerText = '0%';
+            statusText.innerText = 'Scan canceled.';
+            progressContainer.style.display = 'none';
+            showToast('Scan was successfully canceled.', 'info', 4000);
+
+        } else if (result.status === 'success') {
             const report = result.data;
 
             // Store scan ID for AI report generation
@@ -320,9 +357,10 @@ async function startScan() {
                 const evidenceHtml = vuln.evidence
                     ? `<div class="evidence-block"><i class="fas fa-fingerprint evidence-icon"></i>${escapeHtml(vuln.evidence).replace(/\n/g, '<br>')}</div>`
                     : '<span style="color:#9CA3AF;">—</span>';
+                const vulnNameHtml = buildVulnNameLink(vuln.type, vuln.name, vuln.severity);
                 const row = `
                     <tr>
-                        <td>${vuln.type} (${vuln.name})</td>
+                        <td>${vulnNameHtml}</td>
                         <td><span class="status-badge" style="background:${bgColor}; color:${textColor}">${vuln.severity}</span></td>
                         <td>${locationHtml}</td>
                         <td>${evidenceHtml}</td>
@@ -1082,10 +1120,11 @@ async function viewScan(scanId) {
                     ? `<div class="evidence-block"><i class="fas fa-fingerprint evidence-icon"></i>${escapeHtml(vuln.evidence).replace(/\n/g, '<br>')}</div>`
                     : '<span style="color:#9CA3AF;">—</span>';
 
+                const vulnNameHtml = buildVulnNameLink(vuln.type, vuln.name, vuln.severity);
                 const row = `
                     <tr>
                         <td style="color:var(--light-text); font-weight:600;">${index + 1}</td>
-                        <td><strong>${escapeHtml(vuln.type || 'Unknown')}</strong>${vuln.name ? ' <span style="color:var(--light-text);">(' + escapeHtml(vuln.name) + ')</span>' : ''}</td>
+                        <td>${vulnNameHtml}</td>
                         <td><span class="status-badge" style="background:${bgColor}; color:${textColor}">${vuln.severity}</span></td>
                         <td style="max-width:250px; word-break:break-all;">${locationHtml}</td>
                         <td style="font-size:0.85rem; color:var(--light-text); max-width:200px;">${description}</td>
@@ -1960,3 +1999,459 @@ async function exportScanData(format) {
         showToast(`Failed to export as ${format.toUpperCase()}.`, 'error');
     }
 }
+
+
+// -----------------------------------------------
+// 15. Vulnerability Knowledge Base & Detail Modal
+// -----------------------------------------------
+
+/**
+ * Comprehensive vulnerability definitions for all types
+ * detected by Phoenix Scanner. Keys match the `type` field
+ * from scanner results. A fallback key '_default' is provided
+ * for any unknown types (e.g., from AI agent analysis).
+ */
+const VULN_KNOWLEDGE_BASE = {
+    'Cross-Site Scripting (XSS)': {
+        icon: 'fa-code',
+        category: 'Injection',
+        definition: 'Cross-Site Scripting (XSS) is a client-side code injection attack where an attacker injects malicious scripts (usually JavaScript) into web pages viewed by other users.',
+        description: 'XSS vulnerabilities occur when an application includes untrusted data in a web page without proper validation or escaping. Attackers can use XSS to execute scripts in a victim\'s browser, which can hijack user sessions, deface websites, redirect users to malicious sites, or steal sensitive information like cookies and tokens.',
+        impact: { confidentiality: 'High', integrity: 'High', availability: 'Low' },
+        remediation: [
+            'Encode all user-supplied output using context-aware encoding (HTML, JavaScript, URL, CSS)',
+            'Implement Content Security Policy (CSP) headers to restrict script sources',
+            'Use HTTPOnly and Secure flags on session cookies',
+            'Sanitize user input using established libraries (e.g., DOMPurify)',
+            'Use modern frameworks with built-in XSS protection (React, Angular, Vue)'
+        ],
+        references: [
+            { label: 'OWASP XSS', url: 'https://owasp.org/www-community/attacks/xss/' },
+            { label: 'CWE-79', url: 'https://cwe.mitre.org/data/definitions/79.html' },
+            { label: 'OWASP Top 10: A03', url: 'https://owasp.org/Top10/A03_2021-Injection/' }
+        ]
+    },
+    'SQL Injection': {
+        icon: 'fa-database',
+        category: 'Injection',
+        definition: 'SQL Injection (SQLi) is a code injection technique that exploits a security vulnerability in an application\'s database layer by inserting malicious SQL statements into input fields.',
+        description: 'When user input is improperly sanitized and directly concatenated into SQL queries, attackers can manipulate database queries to access, modify, or delete data they are not authorized to see. In severe cases, attackers can execute administrative operations on the database, read system files, or gain operating system access.',
+        impact: { confidentiality: 'Critical', integrity: 'Critical', availability: 'High' },
+        remediation: [
+            'Use parameterized queries (prepared statements) for all database interactions',
+            'Employ an Object-Relational Mapping (ORM) framework',
+            'Implement input validation with a whitelist approach',
+            'Apply the principle of least privilege for database accounts',
+            'Use Web Application Firewalls (WAF) as an additional defense layer',
+            'Regularly audit and test database queries for injection flaws'
+        ],
+        references: [
+            { label: 'OWASP SQLi', url: 'https://owasp.org/www-community/attacks/SQL_Injection' },
+            { label: 'CWE-89', url: 'https://cwe.mitre.org/data/definitions/89.html' },
+            { label: 'OWASP Top 10: A03', url: 'https://owasp.org/Top10/A03_2021-Injection/' }
+        ]
+    },
+    'OS Command Injection': {
+        icon: 'fa-terminal',
+        category: 'Injection',
+        definition: 'OS Command Injection is an attack in which the goal is execution of arbitrary operating system commands on the host via a vulnerable application.',
+        description: 'Command injection vulnerabilities occur when an application passes unsafe user-supplied data to a system shell. An attacker can use this to execute arbitrary commands on the server, potentially gaining full control of the host system, stealing data, installing malware, or pivoting to other internal systems.',
+        impact: { confidentiality: 'Critical', integrity: 'Critical', availability: 'Critical' },
+        remediation: [
+            'Avoid calling OS commands directly from application code whenever possible',
+            'Use language-specific APIs and libraries instead of shell commands',
+            'If OS commands are necessary, use parameterized interfaces that separate commands from arguments',
+            'Implement strict input validation with allowlists for permitted characters',
+            'Run applications with the minimum required OS privileges',
+            'Use sandboxing or containerization to limit command execution scope'
+        ],
+        references: [
+            { label: 'OWASP Command Injection', url: 'https://owasp.org/www-community/attacks/Command_Injection' },
+            { label: 'CWE-78', url: 'https://cwe.mitre.org/data/definitions/78.html' }
+        ]
+    },
+    'Local File Inclusion (LFI)': {
+        icon: 'fa-folder-open',
+        category: 'Injection',
+        definition: 'Local File Inclusion (LFI) is a vulnerability that allows an attacker to include and read files on the server through the web application.',
+        description: 'LFI occurs when a web application dynamically includes files based on user input without proper sanitization. Attackers can exploit this to read sensitive system files (e.g., /etc/passwd, configuration files), view application source code, or in combination with other vulnerabilities, achieve remote code execution through log poisoning or PHP wrappers.',
+        impact: { confidentiality: 'High', integrity: 'Medium', availability: 'Medium' },
+        remediation: [
+            'Avoid dynamic file inclusion based on user input',
+            'Use a whitelist of allowed files/paths if dynamic inclusion is required',
+            'Implement proper input validation — strip path traversal sequences (../, ..\\)',
+            'Configure the web server to restrict file access to the web root directory',
+            'Use chroot jails or containerization to limit filesystem access',
+            'Disable unnecessary PHP wrappers (php://, data://, expect://)'
+        ],
+        references: [
+            { label: 'OWASP LFI', url: 'https://owasp.org/www-project-web-security-testing-guide/v42/4-Web_Application_Security_Testing/07-Input_Validation_Testing/11.1-Testing_for_Local_File_Inclusion' },
+            { label: 'CWE-98', url: 'https://cwe.mitre.org/data/definitions/98.html' }
+        ]
+    },
+    'CORS Misconfiguration': {
+        icon: 'fa-globe',
+        category: 'Misconfiguration',
+        definition: 'A CORS (Cross-Origin Resource Sharing) misconfiguration occurs when a server improperly configures CORS headers, allowing unauthorized cross-origin requests.',
+        description: 'CORS is a browser security mechanism that restricts cross-origin HTTP requests. When CORS is misconfigured — for example, by reflecting the Origin header, using wildcard (*) with credentials, or trusting null origins — attackers can make authenticated requests from malicious websites, potentially stealing sensitive user data or performing unauthorized actions.',
+        impact: { confidentiality: 'High', integrity: 'Medium', availability: 'Low' },
+        remediation: [
+            'Explicitly whitelist trusted origins — never reflect the Origin header directly',
+            'Avoid using Access-Control-Allow-Origin: * with credentials',
+            'Do not trust the "null" origin',
+            'Validate the Origin header against a strict allowlist on the server side',
+            'Limit allowed methods and headers to what is strictly necessary',
+            'Implement proper CSRF protection alongside CORS policies'
+        ],
+        references: [
+            { label: 'OWASP CORS', url: 'https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/11-Client-side_Testing/07-Testing_Cross_Origin_Resource_Sharing' },
+            { label: 'CWE-942', url: 'https://cwe.mitre.org/data/definitions/942.html' }
+        ]
+    },
+    'Cross-Site Request Forgery (CSRF)': {
+        icon: 'fa-user-secret',
+        category: 'Session Management',
+        definition: 'CSRF is an attack that forces an authenticated user to submit a request to a web application against which they are currently authenticated.',
+        description: 'In a CSRF attack, a malicious website, email, or program causes a user\'s browser to perform an unwanted action on a trusted site where the user is authenticated. This can lead to unauthorized state changes such as transferring funds, changing email addresses or passwords, or making purchases — all without the user\'s knowledge or consent.',
+        impact: { confidentiality: 'Low', integrity: 'High', availability: 'Low' },
+        remediation: [
+            'Implement anti-CSRF tokens (synchronizer token pattern) in all state-changing forms',
+            'Use the SameSite cookie attribute (Strict or Lax) on session cookies',
+            'Verify the Origin and Referer headers for state-changing requests',
+            'Require re-authentication for sensitive actions (e.g., password changes, financial transactions)',
+            'Use custom request headers for AJAX requests (since cross-origin requests cannot set custom headers without CORS)'
+        ],
+        references: [
+            { label: 'OWASP CSRF', url: 'https://owasp.org/www-community/attacks/csrf' },
+            { label: 'CWE-352', url: 'https://cwe.mitre.org/data/definitions/352.html' }
+        ]
+    },
+    'Missing Security Header': {
+        icon: 'fa-shield-halved',
+        category: 'Misconfiguration',
+        definition: 'Missing security headers indicate that the web server does not include critical HTTP response headers that help protect against common web attacks.',
+        description: 'HTTP security headers instruct browsers to enable built-in security features. Missing headers like Content-Security-Policy, X-Frame-Options, Strict-Transport-Security (HSTS), X-Content-Type-Options, and Referrer-Policy leave the application vulnerable to XSS, clickjacking, MIME sniffing, downgrade attacks, and information leakage.',
+        impact: { confidentiality: 'Medium', integrity: 'Medium', availability: 'Low' },
+        remediation: [
+            'Add Content-Security-Policy (CSP) header to prevent XSS and data injection attacks',
+            'Set X-Frame-Options to DENY or SAMEORIGIN to prevent clickjacking',
+            'Enable Strict-Transport-Security (HSTS) with a long max-age to enforce HTTPS',
+            'Add X-Content-Type-Options: nosniff to prevent MIME type sniffing',
+            'Configure a strict Referrer-Policy header (e.g., strict-origin-when-cross-origin)',
+            'Set Permissions-Policy to disable unnecessary browser features (camera, microphone, geolocation)'
+        ],
+        references: [
+            { label: 'OWASP Headers', url: 'https://owasp.org/www-project-secure-headers/' },
+            { label: 'CWE-693', url: 'https://cwe.mitre.org/data/definitions/693.html' }
+        ]
+    },
+    'Weak Security Header': {
+        icon: 'fa-shield-virus',
+        category: 'Misconfiguration',
+        definition: 'A weak security header means the server includes a security-related header but with a configuration that does not provide adequate protection.',
+        description: 'Even when security headers are present, they may be misconfigured or use weak values. For example, a permissive CSP with unsafe-inline, a short HSTS max-age, X-XSS-Protection set to 0, or a Referrer-Policy of unsafe-url. These weak configurations provide a false sense of security while leaving the application partially exposed to attacks.',
+        impact: { confidentiality: 'Medium', integrity: 'Medium', availability: 'Low' },
+        remediation: [
+            'Review and strengthen CSP directives — remove unsafe-inline, unsafe-eval where possible',
+            'Set HSTS max-age to at least 31536000 (1 year) and include includeSubDomains',
+            'Use a strict Referrer-Policy (strict-origin-when-cross-origin or no-referrer)',
+            'Ensure X-Content-Type-Options is set to nosniff',
+            'Use security header analysis tools (e.g., securityheaders.com) to audit your configuration',
+            'Regularly review and update security headers as new best practices emerge'
+        ],
+        references: [
+            { label: 'OWASP Headers', url: 'https://owasp.org/www-project-secure-headers/' },
+            { label: 'SecurityHeaders.com', url: 'https://securityheaders.com/' }
+        ]
+    },
+    'Information Disclosure': {
+        icon: 'fa-eye',
+        category: 'Information Exposure',
+        definition: 'Information disclosure (also known as information leakage) is when a web application unintentionally reveals sensitive data to users.',
+        description: 'Information disclosure vulnerabilities expose data that should not be accessible to end users. This includes server version strings, technology stack details, internal IP addresses, file paths, stack traces, database error messages, or backup files. Attackers use this information for reconnaissance — identifying specific software versions to look up known vulnerabilities, or understanding the architecture to plan targeted attacks.',
+        impact: { confidentiality: 'Medium', integrity: 'Low', availability: 'Low' },
+        remediation: [
+            'Remove or suppress server version headers (Server, X-Powered-By, X-AspNet-Version)',
+            'Configure custom error pages that do not expose stack traces or debug information',
+            'Disable directory listing on the web server',
+            'Remove backup files, development artifacts, and commented-out code from production',
+            'Implement proper access controls to restrict access to sensitive endpoints',
+            'Use generic error messages that do not reveal internal implementation details'
+        ],
+        references: [
+            { label: 'OWASP Info Leakage', url: 'https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/01-Information_Gathering/' },
+            { label: 'CWE-200', url: 'https://cwe.mitre.org/data/definitions/200.html' }
+        ]
+    },
+    'UI Redress': {
+        icon: 'fa-layer-group',
+        category: 'Client-Side',
+        definition: 'UI Redress (Clickjacking) is an attack that tricks a user into clicking on something different from what they perceive by overlaying transparent or opaque layers over a legitimate page.',
+        description: 'In a clickjacking attack, the attacker embeds a target website in an invisible iframe and overlays it with a decoy page. When the user interacts with the decoy, they unknowingly perform actions on the hidden target site — such as enabling their webcam, making purchases, or changing account settings. This exploits the absence of X-Frame-Options or Content-Security-Policy frame-ancestors directives.',
+        impact: { confidentiality: 'Low', integrity: 'High', availability: 'Low' },
+        remediation: [
+            'Set X-Frame-Options header to DENY or SAMEORIGIN',
+            'Use Content-Security-Policy: frame-ancestors \'self\' for more granular control',
+            'Implement frame-busting JavaScript as a secondary defense',
+            'Use the SameSite cookie attribute to prevent cookies from being sent in framed contexts',
+            'Ensure critical actions require additional user confirmation (e.g., CAPTCHA, re-authentication)'
+        ],
+        references: [
+            { label: 'OWASP Clickjacking', url: 'https://owasp.org/www-community/attacks/Clickjacking' },
+            { label: 'CWE-1021', url: 'https://cwe.mitre.org/data/definitions/1021.html' }
+        ]
+    },
+    'Insecure Cookie': {
+        icon: 'fa-cookie-bite',
+        category: 'Session Management',
+        definition: 'Insecure cookies are HTTP cookies that lack critical security attributes, making them vulnerable to interception, theft, or unauthorized access.',
+        description: 'When cookies — especially session cookies — are missing security flags like Secure, HttpOnly, and SameSite, they become vulnerable. Cookies without the Secure flag can be intercepted over unencrypted HTTP connections. Cookies without HttpOnly can be accessed by JavaScript (enabling XSS-based theft). Missing SameSite enables CSRF attacks. These weaknesses can lead to session hijacking and account takeover.',
+        impact: { confidentiality: 'High', integrity: 'Medium', availability: 'Low' },
+        remediation: [
+            'Set the Secure flag on all cookies to ensure they are only sent over HTTPS',
+            'Set the HttpOnly flag on session cookies to prevent JavaScript access',
+            'Use SameSite=Strict or SameSite=Lax to prevent cross-site request attacks',
+            'Set appropriate cookie expiration/max-age — avoid long-lived session cookies',
+            'Use the __Host- or __Secure- cookie prefix for additional protections',
+            'Encrypt sensitive cookie values and validate them server-side'
+        ],
+        references: [
+            { label: 'OWASP Cookie Security', url: 'https://owasp.org/www-community/controls/SecureCookieAttribute' },
+            { label: 'CWE-614', url: 'https://cwe.mitre.org/data/definitions/614.html' }
+        ]
+    },
+    'Sensitive Path': {
+        icon: 'fa-folder-tree',
+        category: 'Information Exposure',
+        definition: 'Sensitive path exposure occurs when directories or files containing sensitive information (configuration files, backups, admin panels) are publicly accessible on a web server.',
+        description: 'Web servers often contain files and directories that should not be publicly accessible — such as .git/, .env, wp-admin/, phpinfo.php, backup archives, and configuration files. Attackers use automated directory brute-forcing tools to discover these paths. Finding sensitive paths can reveal source code, credentials, database connection strings, API keys, or administrative interfaces.',
+        impact: { confidentiality: 'High', integrity: 'Medium', availability: 'Low' },
+        remediation: [
+            'Remove unnecessary files (backups, test scripts, default pages) from the web root',
+            'Block access to sensitive directories (.git, .svn, .env) via server configuration',
+            'Implement proper access controls and authentication for admin interfaces',
+            'Use a web application firewall (WAF) to block directory enumeration attempts',
+            'Return consistent 404 responses for non-existent and restricted paths',
+            'Regularly audit publicly accessible paths with scanning tools'
+        ],
+        references: [
+            { label: 'OWASP Directory Traversal', url: 'https://owasp.org/www-community/attacks/Path_Traversal' },
+            { label: 'CWE-538', url: 'https://cwe.mitre.org/data/definitions/538.html' }
+        ]
+    },
+    'Open Redirection': {
+        icon: 'fa-arrow-right-arrow-left',
+        category: 'Input Validation',
+        definition: 'Open Redirection is a vulnerability where a web application accepts user-controlled input to redirect users to an external URL without proper validation.',
+        description: 'Open redirect vulnerabilities occur when a web application uses a user-supplied URL parameter to redirect the browser to a different site. Attackers exploit this to create phishing links that appear to come from a trusted domain, redirecting victims to malicious sites that steal credentials, install malware, or carry out further social engineering attacks.',
+        impact: { confidentiality: 'Medium', integrity: 'Low', availability: 'Low' },
+        remediation: [
+            'Avoid using user-controlled input for redirect destinations',
+            'If redirects are necessary, use a whitelist of allowed URLs/domains',
+            'Use indirect references (e.g., numeric IDs mapping to predefined URLs)',
+            'Validate that redirect URLs are relative paths (same domain)',
+            'Warn users before redirecting to external URLs',
+            'Use the Referer header to verify redirect requests come from your application'
+        ],
+        references: [
+            { label: 'OWASP Open Redirect', url: 'https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html' },
+            { label: 'CWE-601', url: 'https://cwe.mitre.org/data/definitions/601.html' }
+        ]
+    },
+    'SSL/TLS Issue': {
+        icon: 'fa-lock-open',
+        category: 'Cryptography',
+        definition: 'SSL/TLS issues encompass vulnerabilities in the implementation or configuration of SSL/TLS encryption, which secures data transmitted between clients and servers.',
+        description: 'These vulnerabilities include expired or self-signed certificates, support for deprecated protocols (SSL 3.0, TLS 1.0/1.1), weak cipher suites, missing HSTS headers, certificate chain issues, and mixed content. These weaknesses can allow attackers to intercept encrypted traffic through man-in-the-middle attacks, downgrade attacks, or exploit known protocol vulnerabilities like POODLE, BEAST, or CRIME.',
+        impact: { confidentiality: 'High', integrity: 'High', availability: 'Low' },
+        remediation: [
+            'Use valid, trusted certificates from a reputable Certificate Authority (CA)',
+            'Disable SSL 3.0, TLS 1.0, and TLS 1.1 — only allow TLS 1.2 and TLS 1.3',
+            'Configure strong cipher suites and prefer forward secrecy (ECDHE)',
+            'Enable HTTP Strict Transport Security (HSTS) with a long max-age',
+            'Redirect all HTTP traffic to HTTPS',
+            'Regularly renew certificates before expiration and monitor for revocation',
+            'Use tools like SSL Labs (ssllabs.com) to test and grade your SSL/TLS configuration'
+        ],
+        references: [
+            { label: 'OWASP TLS', url: 'https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html' },
+            { label: 'CWE-295', url: 'https://cwe.mitre.org/data/definitions/295.html' },
+            { label: 'SSL Labs', url: 'https://www.ssllabs.com/ssltest/' }
+        ]
+    },
+    '_default': {
+        icon: 'fa-shield-halved',
+        category: 'Security',
+        definition: 'This vulnerability represents a security weakness detected during the scan that could potentially be exploited by an attacker.',
+        description: 'A security vulnerability was identified that may pose a risk to the confidentiality, integrity, or availability of the application and its data. The specific impact depends on the nature of the vulnerability, its location, and the sensitivity of the affected system.',
+        impact: { confidentiality: 'Medium', integrity: 'Medium', availability: 'Low' },
+        remediation: [
+            'Investigate the vulnerability details and evidence provided in the scan report',
+            'Assess the risk based on the severity rating and the sensitivity of the affected system',
+            'Implement appropriate fixes following security best practices',
+            'Test the fix to ensure the vulnerability is properly remediated',
+            'Consider conducting a penetration test for further validation'
+        ],
+        references: [
+            { label: 'OWASP Top 10', url: 'https://owasp.org/www-project-top-ten/' },
+            { label: 'OWASP Testing Guide', url: 'https://owasp.org/www-project-web-security-testing-guide/' }
+        ]
+    }
+};
+
+/**
+ * Look up vulnerability knowledge by type string.
+ * Falls back to '_default' for unknown types.
+ */
+function getVulnKnowledge(vulnType) {
+    // Direct match
+    if (VULN_KNOWLEDGE_BASE[vulnType]) return VULN_KNOWLEDGE_BASE[vulnType];
+
+    // Partial match — check if any key is a substring of the type or vice-versa
+    const lowerType = vulnType.toLowerCase();
+    for (const key of Object.keys(VULN_KNOWLEDGE_BASE)) {
+        if (key === '_default') continue;
+        if (lowerType.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerType)) {
+            return VULN_KNOWLEDGE_BASE[key];
+        }
+    }
+
+    return VULN_KNOWLEDGE_BASE['_default'];
+}
+
+/**
+ * Open the vulnerability detail modal for a given vulnerability type and severity.
+ * Called when a user clicks on a vulnerability name.
+ */
+function openVulnModal(vulnType, severity) {
+    const knowledge = getVulnKnowledge(vulnType);
+    const overlay = document.getElementById('vulnDetailModal');
+    const accent = document.getElementById('vulnModalAccent');
+    const title = document.getElementById('vulnModalTitle');
+    const meta = document.getElementById('vulnModalMeta');
+    const body = document.getElementById('vulnModalBody');
+
+    // Set severity accent
+    const sevClass = (severity || 'info').toLowerCase();
+    accent.className = `vuln-modal-accent severity-${sevClass}`;
+
+    // Severity badge colors
+    let badgeBg, badgeColor;
+    switch (severity) {
+        case 'Critical': badgeBg = '#FDE2E2'; badgeColor = '#991B1B'; break;
+        case 'High': badgeBg = '#FEE2E2'; badgeColor = '#EF4444'; break;
+        case 'Medium': badgeBg = '#FEF3C7'; badgeColor = '#D97706'; break;
+        case 'Low': badgeBg = '#E0E7FF'; badgeColor = '#4338CA'; break;
+        default: badgeBg = '#F3F4F6'; badgeColor = '#6B7280'; break;
+    }
+
+    // Title
+    title.innerHTML = `<i class="fas ${knowledge.icon}"></i>${escapeHtml(vulnType)}`;
+
+    // Meta (severity badge + category)
+    meta.innerHTML = `
+        <span class="vuln-modal-severity-badge" style="background:${badgeBg}; color:${badgeColor}">${severity || 'Info'}</span>
+        <span class="vuln-modal-category"><i class="fas fa-tag"></i>${escapeHtml(knowledge.category)}</span>
+    `;
+
+    // Body content
+    const impactLevel = severity === 'Critical' ? 'critical' : severity === 'High' ? 'high' : severity === 'Medium' ? 'medium' : 'low';
+
+    let bodyHtml = `
+        <!-- Definition -->
+        <div class="vuln-modal-section">
+            <div class="vuln-modal-section-title"><i class="fas fa-book"></i> Definition</div>
+            <div class="vuln-modal-section-content">${escapeHtml(knowledge.definition)}</div>
+        </div>
+
+        <!-- How it works -->
+        <div class="vuln-modal-section">
+            <div class="vuln-modal-section-title"><i class="fas fa-gears"></i> How It Works</div>
+            <div class="vuln-modal-section-content">${escapeHtml(knowledge.description)}</div>
+        </div>
+
+        <!-- Impact -->
+        <div class="vuln-modal-section">
+            <div class="vuln-modal-section-title"><i class="fas fa-bolt"></i> Impact Assessment</div>
+            <div class="vuln-modal-impact">
+                <div class="vuln-modal-impact-item">
+                    <div class="vuln-modal-impact-label">Confidentiality</div>
+                    <div class="vuln-modal-impact-value impact-${knowledge.impact.confidentiality.toLowerCase()}">${knowledge.impact.confidentiality}</div>
+                </div>
+                <div class="vuln-modal-impact-item">
+                    <div class="vuln-modal-impact-label">Integrity</div>
+                    <div class="vuln-modal-impact-value impact-${knowledge.impact.integrity.toLowerCase()}">${knowledge.impact.integrity}</div>
+                </div>
+                <div class="vuln-modal-impact-item">
+                    <div class="vuln-modal-impact-label">Availability</div>
+                    <div class="vuln-modal-impact-value impact-${knowledge.impact.availability.toLowerCase()}">${knowledge.impact.availability}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="vuln-modal-divider"></div>
+
+        <!-- Remediation -->
+        <div class="vuln-modal-section">
+            <div class="vuln-modal-section-title"><i class="fas fa-wrench"></i> Remediation Steps</div>
+            <ol class="vuln-modal-remediation">
+                ${knowledge.remediation.map(step => `<li>${escapeHtml(step)}</li>`).join('')}
+            </ol>
+        </div>
+
+        <!-- References -->
+        <div class="vuln-modal-section">
+            <div class="vuln-modal-section-title"><i class="fas fa-external-link-alt"></i> References</div>
+            <div class="vuln-modal-references">
+                ${knowledge.references.map(ref => `<a href="${ref.url}" target="_blank" rel="noopener noreferrer" class="vuln-modal-ref-link"><i class="fas fa-arrow-up-right-from-square"></i>${escapeHtml(ref.label)}</a>`).join('')}
+            </div>
+        </div>
+    `;
+
+    body.innerHTML = bodyHtml;
+
+    // Show modal
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+/**
+ * Close the vulnerability detail modal.
+ */
+function closeVulnModal() {
+    const overlay = document.getElementById('vulnDetailModal');
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+// Close modal on backdrop click
+document.addEventListener('click', (e) => {
+    const overlay = document.getElementById('vulnDetailModal');
+    if (e.target === overlay) {
+        closeVulnModal();
+    }
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const overlay = document.getElementById('vulnDetailModal');
+        if (overlay && overlay.classList.contains('active')) {
+            closeVulnModal();
+        }
+    }
+});
+
+/**
+ * Create a clickable vulnerability name HTML string.
+ * Used in results tables to make vulnerability names interactive.
+ */
+function buildVulnNameLink(vulnType, vulnName, severity) {
+    const displayType = escapeHtml(vulnType || 'Unknown');
+    const displayName = vulnName ? ` <span style="color:var(--light-text);">(${escapeHtml(vulnName)})</span>` : '';
+    const escapedType = escapeHtml(vulnType || 'Unknown').replace(/'/g, "\\'");
+    const escapedSeverity = escapeHtml(severity || 'Info').replace(/'/g, "\\'");
+
+    return `<span class="vuln-name-link" onclick="openVulnModal('${escapedType}', '${escapedSeverity}')" title="Click for details about ${displayType}"><strong>${displayType}</strong>${displayName}<span class="vuln-click-hint"><i class="fas fa-circle-info"></i></span></span>`;
+}
+

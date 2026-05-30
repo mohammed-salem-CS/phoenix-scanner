@@ -18,7 +18,7 @@ const { extractCrawlMetadata } = require('../services/techFingerprint');
  * and the AI agents focus purely on vulnerability testing and confirmation.
  */
 
-const activeScans = new Map();
+const { registerAIScan, unregisterScan } = require('../services/scanRegistry');
 
 /**
  * Run the script engine's deep Crawler to discover all endpoints, parameters, and forms.
@@ -127,7 +127,7 @@ async function aiScan(targetUrl, apiKey, authOptions = {}) {
             }
 
             const pythonProcess = spawn(pythonPath, args, { env, cwd: __dirname });
-            activeScans.set(targetUrl, pythonProcess);
+            registerAIScan(targetUrl, pythonProcess);
 
             let stdoutData = '';
             let stderrData = '';
@@ -149,7 +149,7 @@ async function aiScan(targetUrl, apiKey, authOptions = {}) {
             });
 
             pythonProcess.on('close', (code) => {
-                activeScans.delete(targetUrl);
+                unregisterScan(targetUrl);
                 cleanupCrawlData(crawlDataFile);
 
                 // Log stderr as agent verbose output (not an error)
@@ -252,15 +252,4 @@ async function aiScan(targetUrl, apiKey, authOptions = {}) {
     }
 }
 
-function cancelScan(targetUrl) {
-    if (activeScans.has(targetUrl)) {
-        console.log(`[Phoenix AI] Canceling active scan for ${targetUrl}`);
-        const proc = activeScans.get(targetUrl);
-        proc.kill('SIGKILL');
-        activeScans.delete(targetUrl);
-        return true;
-    }
-    return false;
-}
-
-module.exports = { aiScan, cancelScan };
+module.exports = { aiScan };

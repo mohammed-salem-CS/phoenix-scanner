@@ -24,13 +24,21 @@ const cookieScanner = require('./scanners/insecureCookies');
 const sslScanner = require('./scanners/ssl');
 
 // 2. Main Engine Logic
-async function scanTarget(url, authOptions = {}, emitProgress = null) {
+async function scanTarget(url, authOptions = {}, emitProgress = null, abortSignal = null) {
     // Capture engine logs via a dedicated logger (not by overriding console.log)
     const logger = new ScanLogger();
 
     // Helper to emit progress (no-op if no callback)
     const progress = (phase, message, percent) => {
         if (emitProgress) emitProgress(phase, message, percent);
+    };
+
+    // Helper to check if the scan has been canceled
+    const checkAbort = () => {
+        if (abortSignal && abortSignal.aborted) {
+            logger.log(`[Phoenix Engine]  ⛔ Scan canceled by user.`);
+            throw new Error('Scan canceled by user.');
+        }
     };
 
     logger.log(`\n[Phoenix Engine]  Initializing Advanced Scan for: ${url}`);
@@ -72,6 +80,7 @@ async function scanTarget(url, authOptions = {}, emitProgress = null) {
 
         // Phase 1: Passive Analysis & Infrastructure Check
 
+        checkAbort();
         logger.log(`[Phoenix Engine]  Phase 1: Passive Analysis & Config Check...`);
         progress('passive', 'Analyzing security headers & configuration...', 15);
 
@@ -109,6 +118,7 @@ async function scanTarget(url, authOptions = {}, emitProgress = null) {
 
 
         // Phase 2: Deep Crawling
+        checkAbort();
         logger.log(`[Phoenix Engine]  Phase 2: Deep Crawling...`);
         progress('crawling', 'Deep crawling website pages...', 35);
         const crawler = new Crawler(url, {
@@ -142,6 +152,7 @@ async function scanTarget(url, authOptions = {}, emitProgress = null) {
         }
 
         // Phase 3: Active Attacks (Reflected / Immediate)
+        checkAbort();
         logger.log(`[Phoenix Engine]  Phase 3: Active Attacks (Dual-Mode: Form & JSON)...`);
         progress('attacks', 'Running active attack suite (SQLi, XSS, LFI, CMD)...', 55);
         const scanPromises = [];
@@ -189,6 +200,7 @@ async function scanTarget(url, authOptions = {}, emitProgress = null) {
 
 
         // Phase 4: Stored Vulnerability Scanning (NEW)
+        checkAbort();
         logger.log(`[Phoenix Engine]  Phase 4: Stored Vulnerability Scanning...`);
         progress('stored', 'Scanning for stored vulnerabilities...', 75);
         const storedScanPromises = [];

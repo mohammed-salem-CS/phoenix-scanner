@@ -10,7 +10,7 @@ const router = express.Router();
 const { auth, adminAuth } = require('../middleware/auth');
 const { validateScanRequest } = require('../middleware/validate');
 const { buildAuthOptions, runAndPersistScan } = require('../services/scanService');
-const { cancelScan } = require('../ai_agents/aiScanner');
+const { cancelScan } = require('../services/scanRegistry');
 const Scan = require('../models/Scan');
 
 // Execute Scan (Protected)
@@ -20,16 +20,22 @@ router.post('/scan', auth, validateScanRequest, async (req, res) => {
     const io = req.app.locals.io; // Socket.IO instance from server.js
 
     try {
-        const { scanResult, scanId, mode } = await runAndPersistScan(
+        const result = await runAndPersistScan(
             url, scanMode, authOptions, req.user.email, io, socketId
         );
-        res.json({ status: 'success', data: scanResult, scanId, scanMode: mode });
+
+        // Check if the scan was canceled
+        if (result.canceled) {
+            return res.json({ status: 'canceled', message: 'Scan was canceled by user.', data: result.scanResult });
+        }
+
+        res.json({ status: 'success', data: result.scanResult, scanId: result.scanId, scanMode: result.mode });
     } catch (scanErr) {
         res.status(400).json({ status: 'error', message: scanErr.message });
     }
 });
 
-// Cancel Scan (Protected)
+// Cancel Scan (Protected — works for ALL scan modes: script, AI, hybrid)
 router.post('/cancel-scan', auth, async (req, res) => {
     const { url } = req.body;
     if (!url) {
