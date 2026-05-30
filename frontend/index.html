@@ -114,6 +114,130 @@
                         <small>AI + Phoenix Engine</small>
                     </button>
                 </div>
+
+                <!-- Pro Mode Toggle -->
+                <div class="pro-mode-toggle">
+                    <button class="pro-mode-toggle-btn" id="proModeToggleBtn" onclick="toggleProMode()">
+                        <i class="fas fa-crown"></i>
+                        <span>Professional Mode</span>
+                        <div class="pro-switch"></div>
+                    </button>
+                </div>
+
+                <!-- Professional Mode Settings Panel -->
+                <div class="pro-mode-panel" id="proModePanel">
+                    <div class="pro-mode-panel-inner">
+                        <div class="pro-panel-header">
+                            <i class="fas fa-crosshairs"></i>
+                            <h3>Professional Configuration</h3>
+                            <span>PRO</span>
+                        </div>
+
+                        <!-- Section 1: Vulnerability Targeting -->
+                        <div class="pro-section">
+                            <div class="pro-section-title">
+                                <i class="fas fa-bullseye"></i> Target Vulnerabilities
+                            </div>
+                            <div class="vuln-quick-actions">
+                                <button class="vuln-quick-btn" onclick="proSelectAll()">Select All</button>
+                                <button class="vuln-quick-btn" onclick="proDeselectAll()">Deselect All</button>
+                                <button class="vuln-quick-btn" onclick="proSelectPreset('injection')">⚡ Injection Only</button>
+                                <button class="vuln-quick-btn" onclick="proSelectPreset('config')">🔧 Config Only</button>
+                            </div>
+                            <div class="vuln-checkbox-grid" id="vulnCheckboxGrid">
+                                <label class="vuln-checkbox-item checked" data-vuln="xss">
+                                    <input type="checkbox" checked> <i class="fas fa-code"></i> XSS
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="sqli">
+                                    <input type="checkbox" checked> <i class="fas fa-database"></i> SQL Injection
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="cmd">
+                                    <input type="checkbox" checked> <i class="fas fa-terminal"></i> CMD Injection
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="lfi">
+                                    <input type="checkbox" checked> <i class="fas fa-folder-open"></i> LFI
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="redirect">
+                                    <input type="checkbox" checked> <i class="fas fa-external-link-alt"></i> Open Redirect
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="headers">
+                                    <input type="checkbox" checked> <i class="fas fa-shield-alt"></i> Headers
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="cors">
+                                    <input type="checkbox" checked> <i class="fas fa-globe"></i> CORS
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="clickjacking">
+                                    <input type="checkbox" checked> <i class="fas fa-mouse-pointer"></i> Clickjacking
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="csrf">
+                                    <input type="checkbox" checked> <i class="fas fa-exchange-alt"></i> CSRF
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="cookies">
+                                    <input type="checkbox" checked> <i class="fas fa-cookie-bite"></i> Insecure Cookies
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="ssl">
+                                    <input type="checkbox" checked> <i class="fas fa-lock"></i> SSL / TLS
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="dirsearch">
+                                    <input type="checkbox" checked> <i class="fas fa-sitemap"></i> Dir Enumeration
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="info">
+                                    <input type="checkbox" checked> <i class="fas fa-info-circle"></i> Info Disclosure
+                                </label>
+                                <label class="vuln-checkbox-item checked" data-vuln="stored">
+                                    <input type="checkbox" checked> <i class="fas fa-archive"></i> Stored Vulns
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="pro-divider"></div>
+
+                        <!-- Section 2: WAF Evasion Level -->
+                        <div class="pro-section">
+                            <div class="pro-section-title">
+                                <i class="fas fa-fire-alt"></i> WAF Evasion Level
+                            </div>
+                            <div class="waf-level-grid" id="wafLevelGrid">
+                                <div class="waf-level-card active" data-level="none" onclick="setWafLevel('none')">
+                                    <div class="waf-icon">🟢</div>
+                                    <div class="waf-label">None</div>
+                                    <div class="waf-desc">No WAF — standard payloads, max speed</div>
+                                </div>
+                                <div class="waf-level-card" data-level="basic" onclick="setWafLevel('basic')">
+                                    <div class="waf-icon">🟡</div>
+                                    <div class="waf-label">Basic</div>
+                                    <div class="waf-desc">URL encoding, case variation, moderate pace</div>
+                                </div>
+                                <div class="waf-level-card" data-level="advanced" onclick="setWafLevel('advanced')">
+                                    <div class="waf-icon">🔴</div>
+                                    <div class="waf-label">Advanced</div>
+                                    <div class="waf-desc">Double encoding, obfuscation, comment insertion</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pro-divider"></div>
+
+                        <!-- Section 3: Request Rate -->
+                        <div class="pro-section">
+                            <div class="pro-section-title">
+                                <i class="fas fa-tachometer-alt"></i> Request Rate
+                            </div>
+                            <div class="rate-control">
+                                <div class="rate-slider-container">
+                                    <input type="range" class="rate-slider" id="rateSlider" min="1" max="50" value="10" oninput="updateRateDisplay(this.value)">
+                                    <div class="rate-labels">
+                                        <span>🐢 Stealth</span>
+                                        <span>⚖️ Normal</span>
+                                        <span>🚀 Aggressive</span>
+                                    </div>
+                                </div>
+                                <div class="rate-value-display" id="rateValueDisplay">10 req/s</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="progress-container" id="progressArea">
                     <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
                         <span style="font-weight:600; display:flex; align-items:center;">

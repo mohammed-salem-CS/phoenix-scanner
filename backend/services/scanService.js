@@ -70,9 +70,10 @@ function sanitizeVulnerabilities(vulnerabilities, fallbackUrl) {
  * @param {string} userEmail   - Requesting user's email
  * @param {object} [io]        - Socket.IO server instance for progress events
  * @param {string} [socketId]  - Socket ID of the requesting client
+ * @param {object} [proMode]   - Professional Mode settings (vulnerabilities, wafLevel, requestsPerSecond)
  * @returns {Promise<{scanResult: object, scanId: string|null, mode: string, duration: string}>}
  */
-async function runAndPersistScan(url, scanMode, authOptions, userEmail, io, socketId) {
+async function runAndPersistScan(url, scanMode, authOptions, userEmail, io, socketId, proMode = null) {
     const mode = VALID_SCAN_MODES.includes(scanMode) ? scanMode : 'script';
     const startTime = Date.now();
 
@@ -91,8 +92,8 @@ async function runAndPersistScan(url, scanMode, authOptions, userEmail, io, sock
 
     let scanResult;
     try {
-        // Execute via strategy pattern — pass AbortController signal
-        scanResult = await executeScan(mode, url, authOptions, emitProgress, abortController.signal);
+        // Execute via strategy pattern — pass AbortController signal + proMode
+        scanResult = await executeScan(mode, url, authOptions, emitProgress, abortController.signal, proMode);
     } catch (execErr) {
         unregisterScan(url);
         // If aborted, return a clean "canceled" response instead of an error

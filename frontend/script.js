@@ -158,6 +158,176 @@ function toggleAdvancedOptions() {
 }
 
 // -----------------------------------------------
+// 2.5 Professional Mode
+// -----------------------------------------------
+const ALL_VULN_TYPES = ['xss','sqli','cmd','lfi','redirect','headers','cors','clickjacking','csrf','cookies','ssl','dirsearch','info','stored'];
+const INJECTION_VULNS = ['xss','sqli','cmd','lfi','redirect'];
+const CONFIG_VULNS = ['headers','cors','clickjacking','csrf','cookies','ssl','dirsearch','info'];
+
+let proModeSettings = {
+    enabled: false,
+    vulnerabilities: [...ALL_VULN_TYPES],
+    wafLevel: 'none',       // 'none' | 'basic' | 'advanced'
+    requestsPerSecond: 10    // 1-50
+};
+
+// Restore Pro Mode state from localStorage
+(function restoreProMode() {
+    try {
+        const saved = localStorage.getItem('phoenix_pro_mode');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            proModeSettings = { ...proModeSettings, ...parsed };
+            if (proModeSettings.enabled) {
+                // Will be applied after DOM is ready
+                document.addEventListener('DOMContentLoaded', () => applyProModeUI(true));
+            }
+        }
+    } catch (e) { /* ignore parse errors */ }
+})();
+
+function saveProModeState() {
+    try {
+        localStorage.setItem('phoenix_pro_mode', JSON.stringify(proModeSettings));
+    } catch (e) { /* ignore storage errors */ }
+}
+
+/**
+ * Toggle Professional Mode on/off.
+ * Switches the entire UI theme and opens/closes the settings panel.
+ */
+function toggleProMode() {
+    proModeSettings.enabled = !proModeSettings.enabled;
+    applyProModeUI(proModeSettings.enabled);
+    saveProModeState();
+}
+
+function applyProModeUI(enabled) {
+    const toggleBtn = document.getElementById('proModeToggleBtn');
+    const panel = document.getElementById('proModePanel');
+
+    if (enabled) {
+        document.body.classList.add('pro-mode');
+        toggleBtn?.classList.add('active');
+        panel?.classList.add('open');
+
+        // Sync checkbox UI with state
+        syncVulnCheckboxes();
+        syncWafLevelUI();
+        syncRateSlider();
+    } else {
+        document.body.classList.remove('pro-mode');
+        toggleBtn?.classList.remove('active');
+        panel?.classList.remove('open');
+    }
+}
+
+// ── Vulnerability Targeting ──
+
+function syncVulnCheckboxes() {
+    const grid = document.getElementById('vulnCheckboxGrid');
+    if (!grid) return;
+    grid.querySelectorAll('.vuln-checkbox-item').forEach(item => {
+        const vulnType = item.dataset.vuln;
+        const checkbox = item.querySelector('input[type="checkbox"]');
+        const isEnabled = proModeSettings.vulnerabilities.includes(vulnType);
+        checkbox.checked = isEnabled;
+        item.classList.toggle('checked', isEnabled);
+    });
+}
+
+// Attach change listeners to checkboxes (runs once after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+    const grid = document.getElementById('vulnCheckboxGrid');
+    if (!grid) return;
+    grid.addEventListener('change', (e) => {
+        if (e.target.type !== 'checkbox') return;
+        const item = e.target.closest('.vuln-checkbox-item');
+        if (!item) return;
+        const vulnType = item.dataset.vuln;
+        if (e.target.checked) {
+            if (!proModeSettings.vulnerabilities.includes(vulnType)) {
+                proModeSettings.vulnerabilities.push(vulnType);
+            }
+            item.classList.add('checked');
+        } else {
+            proModeSettings.vulnerabilities = proModeSettings.vulnerabilities.filter(v => v !== vulnType);
+            item.classList.remove('checked');
+        }
+        saveProModeState();
+    });
+});
+
+function proSelectAll() {
+    proModeSettings.vulnerabilities = [...ALL_VULN_TYPES];
+    syncVulnCheckboxes();
+    saveProModeState();
+}
+
+function proDeselectAll() {
+    proModeSettings.vulnerabilities = [];
+    syncVulnCheckboxes();
+    saveProModeState();
+}
+
+function proSelectPreset(preset) {
+    if (preset === 'injection') {
+        proModeSettings.vulnerabilities = [...INJECTION_VULNS];
+    } else if (preset === 'config') {
+        proModeSettings.vulnerabilities = [...CONFIG_VULNS];
+    }
+    syncVulnCheckboxes();
+    saveProModeState();
+}
+
+// ── WAF Evasion Level ──
+
+function setWafLevel(level) {
+    proModeSettings.wafLevel = level;
+    syncWafLevelUI();
+    saveProModeState();
+}
+
+function syncWafLevelUI() {
+    const grid = document.getElementById('wafLevelGrid');
+    if (!grid) return;
+    grid.querySelectorAll('.waf-level-card').forEach(card => {
+        card.classList.toggle('active', card.dataset.level === proModeSettings.wafLevel);
+    });
+}
+
+// ── Request Rate ──
+
+function updateRateDisplay(value) {
+    const display = document.getElementById('rateValueDisplay');
+    if (display) {
+        display.textContent = value + ' req/s';
+    }
+    proModeSettings.requestsPerSecond = parseInt(value, 10);
+    saveProModeState();
+}
+
+function syncRateSlider() {
+    const slider = document.getElementById('rateSlider');
+    const display = document.getElementById('rateValueDisplay');
+    if (slider) slider.value = proModeSettings.requestsPerSecond;
+    if (display) display.textContent = proModeSettings.requestsPerSecond + ' req/s';
+}
+
+/**
+ * Get the Pro Mode settings to send with the scan request.
+ * Returns null if Pro Mode is disabled (use default scan behavior).
+ */
+function getProModePayload() {
+    if (!proModeSettings.enabled) return null;
+    return {
+        vulnerabilities: proModeSettings.vulnerabilities,
+        wafLevel: proModeSettings.wafLevel,
+        requestsPerSecond: proModeSettings.requestsPerSecond
+    };
+}
+
+// -----------------------------------------------
 // 3. Scan Logic with Smooth Progress Bar
 // -----------------------------------------------
 async function startScan() {
@@ -306,7 +476,8 @@ async function startScan() {
                 scanMode: selectedScanMode, 
                 targetUsername: targetUsername,
                 targetPassword: targetPassword,
-                socketId: socketId
+                socketId: socketId,
+                proMode: getProModePayload()
             })
         });
 

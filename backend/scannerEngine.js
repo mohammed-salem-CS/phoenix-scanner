@@ -24,9 +24,25 @@ const cookieScanner = require('./scanners/insecureCookies');
 const sslScanner = require('./scanners/ssl');
 
 // 2. Main Engine Logic
-async function scanTarget(url, authOptions = {}, emitProgress = null, abortSignal = null) {
+async function scanTarget(url, authOptions = {}, emitProgress = null, abortSignal = null, proMode = null) {
     // Capture engine logs via a dedicated logger (not by overriding console.log)
     const logger = new ScanLogger();
+
+    // Professional Mode: resolve enabled vulnerability types
+    const ALL_VULNS = ['xss','sqli','cmd','lfi','redirect','headers','cors','clickjacking','csrf','cookies','ssl','dirsearch','info','stored'];
+    const enabledVulns = new Set(
+        proMode && Array.isArray(proMode.vulnerabilities) ? proMode.vulnerabilities : ALL_VULNS
+    );
+    const rateDelayMs = (proMode && proMode.requestsPerSecond > 0)
+        ? Math.floor(1000 / proMode.requestsPerSecond)
+        : 0;
+
+    if (proMode) {
+        logger.log(`[Phoenix Engine]  🔴 Professional Mode active`);
+        logger.log(`[Phoenix Engine]     Targets: ${[...enabledVulns].join(', ')}`);
+        logger.log(`[Phoenix Engine]     WAF Evasion: ${proMode.wafLevel || 'none'}`);
+        logger.log(`[Phoenix Engine]     Rate Limit: ${proMode.requestsPerSecond || 'unlimited'} req/s (${rateDelayMs}ms delay)`);
+    }
 
     // Helper to emit progress (no-op if no callback)
     const progress = (phase, message, percent) => {
@@ -40,6 +56,9 @@ async function scanTarget(url, authOptions = {}, emitProgress = null, abortSigna
             throw new Error('Scan canceled by user.');
         }
     };
+
+    // Rate-limiting helper
+    const rateLimit = () => rateDelayMs > 0 ? new Promise(r => setTimeout(r, rateDelayMs)) : Promise.resolve();
 
     logger.log(`\n[Phoenix Engine]  Initializing Advanced Scan for: ${url}`);
     progress('init', 'Initializing Phoenix Engine...', 5);
@@ -85,36 +104,50 @@ async function scanTarget(url, authOptions = {}, emitProgress = null, abortSigna
         progress('passive', 'Analyzing security headers & configuration...', 15);
 
         // A. Security Headers
-        const headerResult = headerScanner.checkSecurityHeaders(headers);
-        pushResult(report, headerResult, 'Security Headers');
+        if (enabledVulns.has('headers')) {
+            const headerResult = headerScanner.checkSecurityHeaders(headers);
+            pushResult(report, headerResult, 'Security Headers');
+        }
 
         // B. Clickjacking
-        const clickResult = clickjackingScanner.checkClickjacking(headers);
-        pushResult(report, clickResult, 'Clickjacking Protection');
+        if (enabledVulns.has('clickjacking')) {
+            const clickResult = clickjackingScanner.checkClickjacking(headers);
+            pushResult(report, clickResult, 'Clickjacking Protection');
+        }
 
         // C. Information Disclosure
-        const infoResult = infoScanner.checkSensitiveInfo(html, url);
-        pushResult(report, infoResult, 'Sensitive Information');
+        if (enabledVulns.has('info')) {
+            const infoResult = infoScanner.checkSensitiveInfo(html, url);
+            pushResult(report, infoResult, 'Sensitive Information');
+        }
 
         // D. CORS Configuration
-        logger.log(`[Phoenix Engine]  Checking CORS Policies...`);
-        const corsResult = await corsScanner.checkCORS(url);
-        pushResult(report, corsResult, 'CORS Misconfiguration');
+        if (enabledVulns.has('cors')) {
+            logger.log(`[Phoenix Engine]  Checking CORS Policies...`);
+            const corsResult = await corsScanner.checkCORS(url);
+            pushResult(report, corsResult, 'CORS Misconfiguration');
+        }
 
         // E. Insecure Cookies
-        const cookieResult = cookieScanner.checkInsecureCookies(headers);
-        pushResult(report, cookieResult, 'Insecure Cookies');
+        if (enabledVulns.has('cookies')) {
+            const cookieResult = cookieScanner.checkInsecureCookies(headers);
+            pushResult(report, cookieResult, 'Insecure Cookies');
+        }
 
         // F. SSL/TLS Check
-        logger.log(`[Phoenix Engine]  Checking SSL/TLS...`);
-        const sslResult = await sslScanner.checkSSL(url);
-        pushResult(report, sslResult, 'SSL/TLS');
+        if (enabledVulns.has('ssl')) {
+            logger.log(`[Phoenix Engine]  Checking SSL/TLS...`);
+            const sslResult = await sslScanner.checkSSL(url);
+            pushResult(report, sslResult, 'SSL/TLS');
+        }
 
         //  G. Dirsearch Discovery 
-        logger.log(`[Phoenix Engine]  Enumerating Directories with Dirsearch...`);
-        progress('dirsearch', 'Enumerating directories...', 25);
-        const dirResult = await dirsearchScanner.runDirsearch(url);
-        pushResult(report, dirResult, 'Directory Brute-force');
+        if (enabledVulns.has('dirsearch')) {
+            logger.log(`[Phoenix Engine]  Enumerating Directories with Dirsearch...`);
+            progress('dirsearch', 'Enumerating directories...', 25);
+            const dirResult = await dirsearchScanner.runDirsearch(url);
+            pushResult(report, dirResult, 'Directory Brute-force');
+        }
 
 
         // Phase 2: Deep Crawling
@@ -136,105 +169,124 @@ async function scanTarget(url, authOptions = {}, emitProgress = null, abortSigna
 
         // Phase 2.5: Post-crawl passive scans
         // A. CSRF check on all discovered forms
-        const csrfResult = csrfScanner.checkCSRF(crawlResult.forms, headers['set-cookie']);
-        pushResult(report, csrfResult, 'CSRF');
+        if (enabledVulns.has('csrf')) {
+            const csrfResult = csrfScanner.checkCSRF(crawlResult.forms, headers['set-cookie']);
+            pushResult(report, csrfResult, 'CSRF');
+        }
 
         // B. Info Disclosure on all crawled pages
-        for (const page of crawlResult.pages) {
-            try {
-                const pageRes = await httpClient.get(page.url, { timeout: 5000, validateStatus: () => true });
-                const pageBody = typeof pageRes.data === 'string' ? pageRes.data : '';
-                if (pageBody) {
-                    const pageInfoResult = infoScanner.checkSensitiveInfo(pageBody, page.url);
-                    pushResult(report, pageInfoResult, 'Info Disclosure (Crawled)');
-                }
-            } catch (e) { /* skip unavailable pages */ }
+        if (enabledVulns.has('info')) {
+            for (const page of crawlResult.pages) {
+                try {
+                    const pageRes = await httpClient.get(page.url, { timeout: 5000, validateStatus: () => true });
+                    const pageBody = typeof pageRes.data === 'string' ? pageRes.data : '';
+                    if (pageBody) {
+                        const pageInfoResult = infoScanner.checkSensitiveInfo(pageBody, page.url);
+                        pushResult(report, pageInfoResult, 'Info Disclosure (Crawled)');
+                    }
+                } catch (e) { /* skip unavailable pages */ }
+            }
         }
 
         // Phase 3: Active Attacks (Reflected / Immediate)
-        checkAbort();
-        logger.log(`[Phoenix Engine]  Phase 3: Active Attacks (Dual-Mode: Form & JSON)...`);
-        progress('attacks', 'Running active attack suite (SQLi, XSS, LFI, CMD)...', 55);
-        const scanPromises = [];
+        const hasActiveVulns = ['xss','sqli','cmd','lfi','redirect'].some(v => enabledVulns.has(v));
+        if (hasActiveVulns) {
+            checkAbort();
+            logger.log(`[Phoenix Engine]  Phase 3: Active Attacks (Dual-Mode: Form & JSON)...`);
+            progress('attacks', 'Running active attack suite (SQLi, XSS, LFI, CMD)...', 55);
+            const scanPromises = [];
 
-        // A. Attack discovered pages that have query parameters
-        for (const page of crawlResult.pages) {
-            if (page.params.length > 0) {
-                scanPromises.push(scanLinkParallel(page.url, report, httpClient));
-            }
-        }
-
-        // B. Attack discovered forms — test each parameter individually
-        for (const form of crawlResult.forms) {
-            const inputNames = Object.keys(form.inputs);
-            if (inputNames.length === 0) continue;
-
-            for (const paramName of inputNames) {
-                const inputInfo = form.inputs[paramName];
-                if (inputInfo && inputInfo.type === 'submit') continue;
-
-                const data = {};
-                for (const [name, info] of Object.entries(form.inputs)) {
-                    if (name === paramName) {
-                        data[name] = 'payload_placeholder';
-                    } else if (info.type === 'submit') {
-                        data[name] = info.value || 'Submit';
-                    } else {
-                        data[name] = info.value || 'test';
-                    }
+            // A. Attack discovered pages that have query parameters
+            for (const page of crawlResult.pages) {
+                if (page.params.length > 0) {
+                    scanPromises.push(scanLinkParallel(page.url, report, httpClient, enabledVulns, rateLimit));
                 }
-                const desc = `Parameter: "${paramName}" in form at ${form.action}`;
+            }
 
-                scanPromises.push(
-                    launchAttackSuite(form.action, form.method, data, desc, 'form', report, httpClient)
-                );
-                if (form.method === 'POST' || form.method === 'PUT') {
+            // B. Attack discovered forms — test each parameter individually
+            for (const form of crawlResult.forms) {
+                const inputNames = Object.keys(form.inputs);
+                if (inputNames.length === 0) continue;
+
+                for (const paramName of inputNames) {
+                    const inputInfo = form.inputs[paramName];
+                    if (inputInfo && inputInfo.type === 'submit') continue;
+
+                    const data = {};
+                    for (const [name, info] of Object.entries(form.inputs)) {
+                        if (name === paramName) {
+                            data[name] = 'payload_placeholder';
+                        } else if (info.type === 'submit') {
+                            data[name] = info.value || 'Submit';
+                        } else {
+                            data[name] = info.value || 'test';
+                        }
+                    }
+                    const desc = `Parameter: "${paramName}" in form at ${form.action}`;
+
                     scanPromises.push(
-                        launchAttackSuite(form.action, form.method, data, desc, 'json', report, httpClient)
+                        launchAttackSuite(form.action, form.method, data, desc, 'form', report, httpClient, enabledVulns, rateLimit)
                     );
+                    if (form.method === 'POST' || form.method === 'PUT') {
+                        scanPromises.push(
+                            launchAttackSuite(form.action, form.method, data, desc, 'json', report, httpClient, enabledVulns, rateLimit)
+                        );
+                    }
                 }
             }
+
+            await Promise.all(scanPromises);
+        } else {
+            logger.log(`[Phoenix Engine]  Phase 3: Skipped (no active attack types enabled)`);
         }
 
-        await Promise.all(scanPromises);
 
+        // Phase 4: Stored Vulnerability Scanning
+        if (enabledVulns.has('stored')) {
+            checkAbort();
+            logger.log(`[Phoenix Engine]  Phase 4: Stored Vulnerability Scanning...`);
+            progress('stored', 'Scanning for stored vulnerabilities...', 75);
+            const storedScanPromises = [];
 
-        // Phase 4: Stored Vulnerability Scanning (NEW)
-        checkAbort();
-        logger.log(`[Phoenix Engine]  Phase 4: Stored Vulnerability Scanning...`);
-        progress('stored', 'Scanning for stored vulnerabilities...', 75);
-        const storedScanPromises = [];
+            for (const form of crawlResult.forms) {
+                // Only test forms that have inputs and use POST/PUT (forms that store data)
+                if (Object.keys(form.inputs).length === 0) continue;
 
-        for (const form of crawlResult.forms) {
-            // Only test forms that have inputs and use POST/PUT (forms that store data)
-            if (Object.keys(form.inputs).length === 0) continue;
+                // Build the list of pages to verify after injection
+                const verifyUrls = buildVerifyUrls(form, crawlResult.pages);
+                if (verifyUrls.length === 0) continue;
 
-            // Build the list of pages to verify after injection
-            const verifyUrls = buildVerifyUrls(form, crawlResult.pages);
-            if (verifyUrls.length === 0) continue;
+                logger.log(`[Phoenix Engine]  Testing stored vulns for form at ${form.action} → checking ${verifyUrls.length} display pages`);
 
-            logger.log(`[Phoenix Engine]  Testing stored vulns for form at ${form.action} → checking ${verifyUrls.length} display pages`);
+                // Run stored XSS and stored SQLi scans sequentially per form
+                // (to avoid race conditions from concurrent injections)
+                storedScanPromises.push(
+                    (async () => {
+                        try {
+                            if (enabledVulns.has('xss')) {
+                                await rateLimit();
+                                await xssScanner.scanForStoredXSS(form, verifyUrls, report, httpClient);
+                            }
+                        } catch (e) {
+                            logger.log(`[Phoenix Engine]  Stored XSS scan error for ${form.action}: ${e.message}`);
+                        }
+                        try {
+                            if (enabledVulns.has('sqli')) {
+                                await rateLimit();
+                                await sqliScanner.scanForStoredSQLi(form, verifyUrls, report, httpClient);
+                            }
+                        } catch (e) {
+                            logger.log(`[Phoenix Engine]  Stored SQLi scan error for ${form.action}: ${e.message}`);
+                        }
+                    })()
+                );
+            }
 
-            // Run stored XSS and stored SQLi scans sequentially per form
-            // (to avoid race conditions from concurrent injections)
-            storedScanPromises.push(
-                (async () => {
-                    try {
-                        await xssScanner.scanForStoredXSS(form, verifyUrls, report, httpClient);
-                    } catch (e) {
-                        logger.log(`[Phoenix Engine]  Stored XSS scan error for ${form.action}: ${e.message}`);
-                    }
-                    try {
-                        await sqliScanner.scanForStoredSQLi(form, verifyUrls, report, httpClient);
-                    } catch (e) {
-                        logger.log(`[Phoenix Engine]  Stored SQLi scan error for ${form.action}: ${e.message}`);
-                    }
-                })()
-            );
+            // Run stored scans (each form is independent, so we can parallelize across forms)
+            await Promise.all(storedScanPromises);
+        } else {
+            logger.log(`[Phoenix Engine]  Phase 4: Skipped (stored vulns not enabled)`);
         }
-
-        // Run stored scans (each form is independent, so we can parallelize across forms)
-        await Promise.all(storedScanPromises);
 
         // Phase 5: Collect Discovery Data — delegate to techFingerprint service
         report.crawlData = extractCrawlMetadata(crawlResult);
@@ -257,7 +309,7 @@ async function scanTarget(url, authOptions = {}, emitProgress = null, abortSigna
 
 // 3. Worker Functions
 
-async function scanLinkParallel(url, report, httpClient) {
+async function scanLinkParallel(url, report, httpClient, enabledVulns = null, rateLimitFn = null) {
     try {
         const urlObj = new URL(url);
         const params = new URLSearchParams(urlObj.search);
@@ -268,7 +320,7 @@ async function scanLinkParallel(url, report, httpClient) {
         for (const [key, value] of params) {
             const data = { [key]: 'test' };
             attackPromises.push(
-                launchAttackSuite(url, 'GET', data, `Link Param: ${key} at ${url}`, 'form', report, httpClient)
+                launchAttackSuite(url, 'GET', data, `Link Param: ${key} at ${url}`, 'form', report, httpClient, enabledVulns, rateLimitFn)
             );
         }
         await Promise.all(attackPromises);
@@ -333,23 +385,42 @@ function buildVerifyUrls(form, crawledPages) {
 
 
 // 5. Unified Attack Suite (Reflected/Immediate attacks)
-async function launchAttackSuite(url, method, data, desc, contentType, report, httpClient) {
-    await Promise.all([
-        sqliScanner.scanForSQLi(url, method, data, desc, contentType, httpClient)
-            .then(res => pushResult(report, res, `SQLi (${contentType})`, true)),
+async function launchAttackSuite(url, method, data, desc, contentType, report, httpClient, enabledVulns = null, rateLimitFn = null) {
+    const rl = rateLimitFn || (() => Promise.resolve());
+    const attacks = [];
 
-        xssScanner.scanForXSS(url, method, data, desc, contentType, httpClient)
-            .then(res => pushResult(report, res, `XSS (${contentType})`, true)),
+    if (!enabledVulns || enabledVulns.has('sqli')) {
+        attacks.push(rl().then(() =>
+            sqliScanner.scanForSQLi(url, method, data, desc, contentType, httpClient)
+                .then(res => pushResult(report, res, `SQLi (${contentType})`, true))
+        ));
+    }
+    if (!enabledVulns || enabledVulns.has('xss')) {
+        attacks.push(rl().then(() =>
+            xssScanner.scanForXSS(url, method, data, desc, contentType, httpClient)
+                .then(res => pushResult(report, res, `XSS (${contentType})`, true))
+        ));
+    }
+    if (!enabledVulns || enabledVulns.has('lfi')) {
+        attacks.push(rl().then(() =>
+            lfiScanner.scanForLFI(url, method, data, desc, contentType, httpClient)
+                .then(res => pushResult(report, res, `LFI (${contentType})`, true))
+        ));
+    }
+    if (!enabledVulns || enabledVulns.has('cmd')) {
+        attacks.push(rl().then(() =>
+            cmdScanner.scanForCmdInjection(url, method, data, desc, contentType, httpClient)
+                .then(res => pushResult(report, res, `Command Injection (${contentType})`, true))
+        ));
+    }
+    if (!enabledVulns || enabledVulns.has('redirect')) {
+        attacks.push(rl().then(() =>
+            redirectScanner.scanForOpenRedirect(url, method, data, desc, contentType, httpClient)
+                .then(res => pushResult(report, res, `Open Redirect (${contentType})`, true))
+        ));
+    }
 
-        lfiScanner.scanForLFI(url, method, data, desc, contentType, httpClient)
-            .then(res => pushResult(report, res, `LFI (${contentType})`, true)),
-
-        cmdScanner.scanForCmdInjection(url, method, data, desc, contentType, httpClient)
-            .then(res => pushResult(report, res, `Command Injection (${contentType})`, true)),
-
-        redirectScanner.scanForOpenRedirect(url, method, data, desc, contentType, httpClient)
-            .then(res => pushResult(report, res, `Open Redirect (${contentType})`, true))
-    ]);
+    await Promise.all(attacks);
 }
 
 

@@ -15,13 +15,13 @@ const Scan = require('../models/Scan');
 
 // Execute Scan (Protected)
 router.post('/scan', auth, validateScanRequest, async (req, res) => {
-    const { url, scanMode, socketId } = req.body;
+    const { url, scanMode, socketId, proMode } = req.body;
     const authOptions = buildAuthOptions(req.body);
     const io = req.app.locals.io; // Socket.IO instance from server.js
 
     try {
         const result = await runAndPersistScan(
-            url, scanMode, authOptions, req.user.email, io, socketId
+            url, scanMode, authOptions, req.user.email, io, socketId, proMode || null
         );
 
         // Check if the scan was canceled
