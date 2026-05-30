@@ -75,26 +75,6 @@
                     <button id="cancelScanBtn" onclick="cancelScan()" style="display:none; background: var(--danger-red); border-color: var(--danger-red);"><i class="fas fa-times" style="margin-right:6px;"></i>Cancel</button>
                 </div>
 
-                <!-- Advanced Options -->
-                <div style="margin-top: 1rem; text-align: left; padding: 0 1rem;">
-                    <a href="#" onclick="toggleAdvancedOptions(); return false;" style="color: var(--primary-orange); font-size: 0.9rem; text-decoration: none;">
-                        <i class="fas fa-user-lock"></i> Auto-Login Settings
-                    </a>
-                    <div id="advancedOptions" style="display: none; margin-top: 0.8rem; background: rgba(0,0,0,0.05); padding: 1rem; border-radius: 6px; border: 1px solid var(--border-color);">
-                        <p style="font-size: 0.85rem; color: var(--light-text); margin-bottom: 1rem;">If the target site requires authentication, enter the credentials below. The scanner will automatically detect the login form and authenticate before scanning.</p>
-                        
-                        <div style="display: flex; gap: 1rem;">
-                            <div style="flex: 1;">
-                                <label style="font-size: 0.85rem; font-weight: 600; display: block; margin-bottom: 0.4rem;">Target Username</label>
-                                <input type="text" id="targetUsername" placeholder="e.g., admin" style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); color: var(--text-color);">
-                            </div>
-                            <div style="flex: 1;">
-                                <label style="font-size: 0.85rem; font-weight: 600; display: block; margin-bottom: 0.4rem;">Target Password</label>
-                                <input type="password" id="targetPassword" placeholder="e.g., password" style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); color: var(--text-color);">
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 <!-- Scan Mode Selector -->
                 <div class="scan-mode-selector" id="scanModeSelector">

@@ -152,10 +152,7 @@ function setScanMode(mode) {
     }
 }
 
-function toggleAdvancedOptions() {
-    const el = document.getElementById('advancedOptions');
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
+
 
 // -----------------------------------------------
 // 2.5 Professional Mode
@@ -205,11 +202,15 @@ function toggleProMode() {
 function applyProModeUI(enabled) {
     const toggleBtn = document.getElementById('proModeToggleBtn');
     const panel = document.getElementById('proModePanel');
+    const scanModeSelector = document.getElementById('scanModeSelector');
 
     if (enabled) {
         document.body.classList.add('pro-mode');
         toggleBtn?.classList.add('active');
         panel?.classList.add('open');
+
+        // Hide inspection mode options (scan mode selector & auto-login settings)
+        if (scanModeSelector) scanModeSelector.style.display = 'none';
 
         // Sync checkbox UI with state
         syncVulnCheckboxes();
@@ -219,6 +220,9 @@ function applyProModeUI(enabled) {
         document.body.classList.remove('pro-mode');
         toggleBtn?.classList.remove('active');
         panel?.classList.remove('open');
+
+        // Restore inspection mode options
+        if (scanModeSelector) scanModeSelector.style.display = '';
     }
 }
 
@@ -332,8 +336,7 @@ function getProModePayload() {
 // -----------------------------------------------
 async function startScan() {
     const url = document.getElementById('scanUrl').value.trim();
-    const targetUsername = document.getElementById('targetUsername')?.value.trim();
-    const targetPassword = document.getElementById('targetPassword')?.value.trim();
+
 
     if (!url) {
         showToast("Please enter a URL to scan.", "warning");
@@ -474,8 +477,7 @@ async function startScan() {
             body: JSON.stringify({ 
                 url: url, 
                 scanMode: selectedScanMode, 
-                targetUsername: targetUsername,
-                targetPassword: targetPassword,
+
                 socketId: socketId,
                 proMode: getProModePayload()
             })
