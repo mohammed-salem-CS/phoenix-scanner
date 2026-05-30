@@ -45,28 +45,34 @@
 /* Dark Mode Overrides - BLAZE DARK MODE (Phoenix Inspired) */
 body.dark-mode {
     /* 1. The Base: True Black for Maximum Contrast */
-    --bg-body: #000000;            /* Absolute black as requested */
-    --white: #000000;              /* Surfaces blend into black */
-    --card-bg: #000000; 
-    --stat-card-bg: #0A0A0A; 
+    --bg-body: #000000;
+    /* Absolute black as requested */
+    --white: #000000;
+    /* Surfaces blend into black */
+    --card-bg: #000000;
+    --stat-card-bg: #0A0A0A;
     --navbar-bg: #000000;
     --table-header-bg: #000000;
     --scrollbar-thumb: #1C1917;
 
     /* 2. Typography: Warm High-Contrast Palette */
-    --dark-text: #FAF7F5;          /* High-contrast soft cream */
-    --light-text: #A8A29E;         /* Warm grey for secondary info */
+    --dark-text: #FAF7F5;
+    /* High-contrast soft cream */
+    --light-text: #A8A29E;
+    /* Warm grey for secondary info */
     --disabled-text: #57534E;
-    
+
     /* 3. Accent Color: Safety Orange Blaze */
-    --primary-orange: #F97316;           /* Vivid Safety Orange */
+    --primary-orange: #F97316;
+    /* Vivid Safety Orange */
     --primary-orange-dark: #EA580C;
     --primary-orange-light: #FB923C;
-    --light-orange-bg: rgba(249, 115, 22, 0.12); 
+    --light-orange-bg: rgba(249, 115, 22, 0.12);
     --accent-yellow: #FBBF24;
 
     /* 4. Alert System: Vibrant Contrast */
-    --danger-red: #EF4444;         /* Vibrant Intense Red */
+    --danger-red: #EF4444;
+    /* Vibrant Intense Red */
     --critical-darkred: #991B1B;
     --warning-amber: #F59E0B;
     --info-blue: #38BDF8;
@@ -74,11 +80,13 @@ body.dark-mode {
 
     /* 5. Interactive States: Intensified Glows */
     --border-color: transparent;
-    --border-glow: 0 0 25px rgba(234, 88, 12, 0.25); /* Larger, more vibrant glow */
+    --border-glow: 0 0 25px rgba(234, 88, 12, 0.25);
+    /* Larger, more vibrant glow */
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.8);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.9);
     --shadow-lg: 0 12px 24px rgba(0, 0, 0, 1);
-    --shadow-orange: 0 0 35px rgba(249, 115, 22, 0.5); /* Powerful focal glow for the blaze */
+    --shadow-orange: 0 0 35px rgba(249, 115, 22, 0.5);
+    /* Powerful focal glow for the blaze */
 }
 
 /* Enhanced Luminous Depth for elements in Dark Mode (No hard borders) */
@@ -92,12 +100,14 @@ body.dark-mode .sidebar-menu {
 
 body.dark-mode .styled-table td,
 body.dark-mode .styled-table th {
-    border-bottom: 1px solid rgba(249, 115, 22, 0.05); /* Minimal separator, barely visible */
+    border-bottom: 1px solid rgba(249, 115, 22, 0.05);
+    /* Minimal separator, barely visible */
 }
 
 body.dark-mode .styled-table tbody tr:hover {
     background-color: rgba(249, 115, 22, 0.05);
-    box-shadow: inset 0 0 10px rgba(249, 115, 22, 0.05); /* Soft inner glow on hover */
+    box-shadow: inset 0 0 10px rgba(249, 115, 22, 0.05);
+    /* Soft inner glow on hover */
 }
 
 body.dark-mode .sidebar-menu div {
@@ -137,7 +147,8 @@ html {
 
 body {
     font-family: 'Poppins', 'Inter', sans-serif;
-    background-color: var(--bg-body); /* Dynamic: Switches with theme */
+    background-color: var(--bg-body);
+    /* Dynamic: Switches with theme */
     background-attachment: fixed;
     color: var(--dark-text);
     line-height: 1.6;
@@ -157,7 +168,7 @@ body.dark-mode::before {
     left: 0;
     width: 100%;
     height: 100%;
-    background-image: 
+    background-image:
         linear-gradient(rgba(234, 88, 12, 0.03) 1px, transparent 1px),
         linear-gradient(90deg, rgba(234, 88, 12, 0.03) 1px, transparent 1px);
     background-size: 40px 40px;
@@ -173,11 +184,9 @@ body.dark-mode::after {
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(
-        transparent 0%,
-        rgba(234, 88, 12, 0.05) 50%,
-        transparent 100%
-    );
+    background: linear-gradient(transparent 0%,
+            rgba(234, 88, 12, 0.05) 50%,
+            transparent 100%);
     background-size: 100% 4px;
     animation: scanline 10s linear infinite;
     pointer-events: none;
@@ -186,8 +195,13 @@ body.dark-mode::after {
 }
 
 @keyframes scanline {
-    0% { transform: translateY(-100%); }
-    100% { transform: translateY(100%); }
+    0% {
+        transform: translateY(-100%);
+    }
+
+    100% {
+        transform: translateY(100%);
+    }
 }
 
 .container {
@@ -1500,6 +1514,23 @@ body.dark-mode .tool-btn:hover {
     max-width: 720px;
     position: relative;
     z-index: 1;
+    /* Animated crossfade transition */
+    opacity: 1;
+    max-height: 200px;
+    transform: translateY(0);
+    overflow: hidden;
+    transition: opacity 0.35s ease,
+        max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.35s ease,
+        margin 0.35s ease;
+}
+
+.scan-mode-selector.pro-hidden {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-10px);
+    margin-top: 0;
+    pointer-events: none;
 }
 
 .scan-mode-btn {
@@ -1961,7 +1992,7 @@ body.dark-mode .compare-stat-persistent {
     align-items: center;
     gap: 1rem;
     padding: 0.8rem 1.2rem;
-    background: linear-gradient(135deg, var(--light-orange-bg), rgba(255,247,237,0.5));
+    background: linear-gradient(135deg, var(--light-orange-bg), rgba(255, 247, 237, 0.5));
     border: 1px solid var(--primary-orange-light);
     border-radius: 12px;
     margin-bottom: 1rem;
@@ -2093,8 +2124,15 @@ body.dark-mode .vuln-modal {
 }
 
 @keyframes severityPulse {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
 }
 
 /* Header */
@@ -2264,10 +2302,21 @@ body.dark-mode .vuln-modal-impact-item {
     font-weight: 700;
 }
 
-.vuln-modal-impact-value.impact-critical { color: #991B1B; }
-.vuln-modal-impact-value.impact-high { color: #EF4444; }
-.vuln-modal-impact-value.impact-medium { color: #D97706; }
-.vuln-modal-impact-value.impact-low { color: #3B82F6; }
+.vuln-modal-impact-value.impact-critical {
+    color: #991B1B;
+}
+
+.vuln-modal-impact-value.impact-high {
+    color: #EF4444;
+}
+
+.vuln-modal-impact-value.impact-medium {
+    color: #D97706;
+}
+
+.vuln-modal-impact-value.impact-low {
+    color: #3B82F6;
+}
 
 /* Remediation steps */
 .vuln-modal-remediation {
@@ -2473,11 +2522,9 @@ body.pro-mode.dark-mode::before {
 }
 
 body.pro-mode.dark-mode::after {
-    background: linear-gradient(
-        transparent 0%,
-        rgba(234, 43, 31, 0.05) 50%,
-        transparent 100%
-    );
+    background: linear-gradient(transparent 0%,
+            rgba(234, 43, 31, 0.05) 50%,
+            transparent 100%);
 }
 
 body.pro-mode.dark-mode .card,
@@ -2516,9 +2563,17 @@ body.pro-mode .scan-mode-btn.active#modeScript {
     box-shadow: 0 4px 14px rgba(234, 43, 31, 0.15);
 }
 
-body.pro-mode .scan-mode-btn.active#modeScript i { color: #EA2B1F; }
-body.pro-mode .scan-mode-btn.active#modeScript span { color: #C41E14; }
-body.pro-mode .scan-mode-btn.active#modeScript::after { color: #EA2B1F; }
+body.pro-mode .scan-mode-btn.active#modeScript i {
+    color: #EA2B1F;
+}
+
+body.pro-mode .scan-mode-btn.active#modeScript span {
+    color: #C41E14;
+}
+
+body.pro-mode .scan-mode-btn.active#modeScript::after {
+    color: #EA2B1F;
+}
 
 /* Progress bar in Pro Mode */
 body.pro-mode .progress-fill {
@@ -2635,7 +2690,7 @@ body.dark-mode .pro-mode-toggle-btn.active {
     border-radius: 50%;
     background: white;
     transition: transform var(--transition-normal);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .pro-mode-toggle-btn.active .pro-switch {
@@ -2654,8 +2709,8 @@ body.dark-mode .pro-mode-toggle-btn.active {
     overflow: hidden;
     opacity: 0;
     transition: max-height 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.3s ease,
-                margin 0.3s ease;
+        opacity 0.3s ease,
+        margin 0.3s ease;
     position: relative;
     z-index: 1;
 }
@@ -2891,6 +2946,7 @@ body.dark-mode .waf-level-card {
     border-color: #10B981;
     background: #ECFDF5;
 }
+
 body.dark-mode .waf-level-card.active[data-level="none"] {
     background: rgba(16, 185, 129, 0.1);
     border-color: #10B981;
@@ -2900,6 +2956,7 @@ body.dark-mode .waf-level-card.active[data-level="none"] {
     border-color: #F59E0B;
     background: #FFFBEB;
 }
+
 body.dark-mode .waf-level-card.active[data-level="basic"] {
     background: rgba(245, 158, 11, 0.1);
     border-color: #F59E0B;
@@ -2910,6 +2967,7 @@ body.dark-mode .waf-level-card.active[data-level="basic"] {
     background: #FEF2F2;
     box-shadow: 0 4px 14px rgba(234, 43, 31, 0.15);
 }
+
 body.dark-mode .waf-level-card.active[data-level="advanced"] {
     background: rgba(234, 43, 31, 0.1);
     border-color: #EA2B1F;
@@ -2945,7 +3003,7 @@ body.dark-mode .waf-level-card.active[data-level="advanced"] {
     border-radius: 50%;
     background: white;
     border: 3px solid #EA2B1F;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     cursor: pointer;
     transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -2961,7 +3019,7 @@ body.dark-mode .waf-level-card.active[data-level="advanced"] {
     border-radius: 50%;
     background: white;
     border: 3px solid #EA2B1F;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     cursor: pointer;
 }
 
@@ -3034,4 +3092,140 @@ body.dark-mode .pro-divider {
     .pro-mode-panel-inner {
         padding: 1rem;
     }
-}
+}
+
+/* ============================================= */
+/*  PRO MODE — Smooth Color Theme Transition     */
+/* ============================================= */
+
+/* Transition color-related properties on key elements for fluid pro-mode switch */
+.navbar,
+.navbar .logo-text,
+.card,
+.stat-card,
+.scan-bar,
+.scan-bar button,
+.progress-fill,
+.tool-btn,
+.save-btn,
+.scan-mode-btn,
+.pro-mode-toggle-btn {
+    transition: background 0.5s ease,
+        border-color 0.5s ease,
+        box-shadow 0.5s ease,
+        color 0.5s ease;
+}
+
+.navbar .logo-text {
+    transition: background 0.5s ease,
+        -webkit-text-fill-color 0.5s ease;
+}
+
+.progress-fill {
+    transition: width var(--transition-normal),
+        background 0.5s ease,
+        box-shadow 0.5s ease;
+}
+
+/* ============================================= */
+/*  PRO MODE — PRO Badge on Scan Button          */
+/* ============================================= */
+
+#startScanBtn {
+    position: relative;
+    overflow: visible;
+}
+
+.pro-badge {
+    position: absolute;
+    top: -2px;
+    right: -3px;
+    background: linear-gradient(135deg, #EA2B1F, #C41E14);
+    color: white;
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    box-shadow: 0 2px 8px rgba(234, 43, 31, 0.4);
+    pointer-events: none;
+    animation: proBadgePulse 2s ease-in-out infinite;
+    z-index: 2;
+    opacity: 0;
+    transform: scale(0.5);
+    transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.pro-badge.visible {
+    opacity: 1;
+    transform: scale(1);
+}
+
+@keyframes proBadgePulse {
+
+    0%,
+    100% {
+        box-shadow: 0 2px 8px rgba(234, 43, 31, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 2px 14px rgba(234, 43, 31, 0.7);
+    }
+}
+
+/* ============================================= */
+/*  PRO MODE — Compact Settings Summary          */
+/* ============================================= */
+
+.pro-mode-summary {
+    max-width: 720px;
+    margin: 0 auto;
+    text-align: center;
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.35s ease,
+        margin 0.3s ease;
+}
+
+.pro-mode-summary.visible {
+    max-height: 60px;
+    opacity: 1;
+    margin-top: 0.6rem;
+}
+
+.pro-mode-summary-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.4rem 1rem;
+    background: rgba(234, 43, 31, 0.06);
+    border: 1px solid rgba(234, 43, 31, 0.15);
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #EA2B1F;
+    letter-spacing: 0.2px;
+}
+
+body.dark-mode .pro-mode-summary-inner {
+    background: rgba(234, 43, 31, 0.08);
+    border-color: rgba(234, 43, 31, 0.2);
+    color: #F87171;
+}
+
+.pro-mode-summary-inner i {
+    font-size: 0.72rem;
+    opacity: 0.7;
+}
+
+.pro-summary-dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.4;
+    display: inline-block;
+}

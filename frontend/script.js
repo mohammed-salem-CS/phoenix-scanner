@@ -197,33 +197,77 @@ function toggleProMode() {
     proModeSettings.enabled = !proModeSettings.enabled;
     applyProModeUI(proModeSettings.enabled);
     saveProModeState();
+
+    // Toast confirmation
+    if (proModeSettings.enabled) {
+        showToast('Professional Mode activated — advanced configuration enabled.', 'success', 3500);
+    } else {
+        showToast('Switched to Standard Mode.', 'info', 3000);
+    }
 }
 
 function applyProModeUI(enabled) {
     const toggleBtn = document.getElementById('proModeToggleBtn');
     const panel = document.getElementById('proModePanel');
     const scanModeSelector = document.getElementById('scanModeSelector');
+    const proBadge = document.getElementById('proBadge');
+    const proSummary = document.getElementById('proModeSummary');
 
     if (enabled) {
         document.body.classList.add('pro-mode');
         toggleBtn?.classList.add('active');
-        panel?.classList.add('open');
 
-        // Hide inspection mode options (scan mode selector & auto-login settings)
-        if (scanModeSelector) scanModeSelector.style.display = 'none';
+        // Animated crossfade: slide scan modes out, then open pro panel
+        if (scanModeSelector) scanModeSelector.classList.add('pro-hidden');
+
+        // Open pro panel after scan modes start fading (staggered)
+        setTimeout(() => panel?.classList.add('open'), 150);
+
+        // Show PRO badge on scan button with pop-in
+        setTimeout(() => proBadge?.classList.add('visible'), 200);
+
+        // Show & update compact summary
+        updateProModeSummary();
+        setTimeout(() => proSummary?.classList.add('visible'), 250);
 
         // Sync checkbox UI with state
         syncVulnCheckboxes();
         syncWafLevelUI();
         syncRateSlider();
     } else {
-        document.body.classList.remove('pro-mode');
-        toggleBtn?.classList.remove('active');
+        // Close pro panel first
         panel?.classList.remove('open');
+        proSummary?.classList.remove('visible');
+        proBadge?.classList.remove('visible');
 
-        // Restore inspection mode options
-        if (scanModeSelector) scanModeSelector.style.display = '';
+        // Fade scan modes back in after panel starts closing
+        setTimeout(() => {
+            if (scanModeSelector) scanModeSelector.classList.remove('pro-hidden');
+        }, 150);
+
+        // Remove pro-mode theme after transitions settle
+        setTimeout(() => {
+            document.body.classList.remove('pro-mode');
+        }, 300);
+
+        toggleBtn?.classList.remove('active');
     }
+}
+
+/**
+ * Build and update the compact settings summary text.
+ * Called whenever pro mode settings change.
+ */
+function updateProModeSummary() {
+    const textEl = document.getElementById('proSummaryText');
+    if (!textEl) return;
+
+    const vulnCount = proModeSettings.vulnerabilities.length;
+    const wafLabels = { none: 'None', basic: 'Basic', advanced: 'Advanced' };
+    const wafLabel = wafLabels[proModeSettings.wafLevel] || 'None';
+    const rate = proModeSettings.requestsPerSecond;
+
+    textEl.textContent = `${vulnCount} vuln${vulnCount !== 1 ? 's' : ''} · WAF: ${wafLabel} · ${rate} req/s`;
 }
 
 // ── Vulnerability Targeting ──
@@ -259,6 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
             item.classList.remove('checked');
         }
         saveProModeState();
+        updateProModeSummary();
     });
 });
 
@@ -266,12 +311,14 @@ function proSelectAll() {
     proModeSettings.vulnerabilities = [...ALL_VULN_TYPES];
     syncVulnCheckboxes();
     saveProModeState();
+    updateProModeSummary();
 }
 
 function proDeselectAll() {
     proModeSettings.vulnerabilities = [];
     syncVulnCheckboxes();
     saveProModeState();
+    updateProModeSummary();
 }
 
 function proSelectPreset(preset) {
@@ -282,6 +329,7 @@ function proSelectPreset(preset) {
     }
     syncVulnCheckboxes();
     saveProModeState();
+    updateProModeSummary();
 }
 
 // ── WAF Evasion Level ──
@@ -290,6 +338,7 @@ function setWafLevel(level) {
     proModeSettings.wafLevel = level;
     syncWafLevelUI();
     saveProModeState();
+    updateProModeSummary();
 }
 
 function syncWafLevelUI() {
@@ -309,6 +358,7 @@ function updateRateDisplay(value) {
     }
     proModeSettings.requestsPerSecond = parseInt(value, 10);
     saveProModeState();
+    updateProModeSummary();
 }
 
 function syncRateSlider() {

@@ -70,8 +70,10 @@
 
                 <div class="scan-bar">
                     <input type="url" id="scanUrl" placeholder="Enter Target URL (e.g., https://example.com)">
-                    <button id="startScanBtn" onclick="startScan()"><i class="fas fa-bolt" style="margin-right:6px;"></i>Start
-                        Scan</button>
+                    <button id="startScanBtn" onclick="startScan()">
+                        <i class="fas fa-bolt" style="margin-right:6px;"></i>Start Scan
+                        <span class="pro-badge" id="proBadge">PRO</span>
+                    </button>
                     <button id="cancelScanBtn" onclick="cancelScan()" style="display:none; background: var(--danger-red); border-color: var(--danger-red);"><i class="fas fa-times" style="margin-right:6px;"></i>Cancel</button>
                 </div>
 
@@ -81,7 +83,7 @@
                     <button class="scan-mode-btn active" id="modeScript" onclick="setScanMode('script')">
                         <i class="fas fa-terminal"></i>
                         <span>Script Engine</span>
-                        <small>Deep crawling & payload testing</small>
+                        <small>Deep crawling &amp; payload testing</small>
                     </button>
                     <button class="scan-mode-btn" id="modeAI" onclick="setScanMode('ai')">
                         <i class="fas fa-robot"></i>
@@ -102,6 +104,14 @@
                         <span>Professional Mode</span>
                         <div class="pro-switch"></div>
                     </button>
+                </div>
+
+                <!-- Pro Mode Compact Summary -->
+                <div class="pro-mode-summary" id="proModeSummary">
+                    <div class="pro-mode-summary-inner" id="proModeSummaryInner">
+                        <i class="fas fa-crown"></i>
+                        <span id="proSummaryText">14 vulns · WAF: None · 10 req/s</span>
+                    </div>
                 </div>
 
                 <!-- Professional Mode Settings Panel -->
