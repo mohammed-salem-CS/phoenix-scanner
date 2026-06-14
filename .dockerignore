@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+
+# Python virtual environments
+venv/
+.venv/
+backend/ai_agents/venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Windows executables (we install Linux versions in Docker)
+*.exe
+
+# Git
+.git/
+.gitignore
+
+# Environment files (secrets — injected via docker-compose)
+.env
+backend/.env
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Documentation (not needed in container)
+*.md
+feature_recommendations.md
+
+# Temp files
+backend/ai_agents/tmp/
+
+# Lock files for root (backend has its own)
+package-lock.json

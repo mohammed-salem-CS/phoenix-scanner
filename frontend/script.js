@@ -3,15 +3,22 @@
 // =============================================
 
 // -----------------------------------------------
+// API Base URL — auto-detects current origin
+// Works on localhost (dev) and any domain/IP (prod)
+// -----------------------------------------------
+const API_BASE = window.location.origin;
+
+// -----------------------------------------------
 // 0a. Socket.IO Real-Time Connection (Feature #2)
 // -----------------------------------------------
 let phoenixSocket = null;
 let _scanProgressHighWaterMark = 0; // Tracks the highest progress value to prevent regression
 
+
 function initSocket() {
     if (phoenixSocket) return phoenixSocket;
     try {
-        phoenixSocket = io('http://localhost:3000', { transports: ['websocket', 'polling'] });
+        phoenixSocket = io(API_BASE, { transports: ['websocket', 'polling'] });
         phoenixSocket.on('connect', () => {
             console.log('[Phoenix] Socket.IO connected:', phoenixSocket.id);
         });
@@ -518,7 +525,7 @@ async function startScan() {
         const socket = initSocket();
         const socketId = socket && socket.connected ? socket.id : null;
 
-        const response = await fetch('http://localhost:3000/scan', {
+        const response = await fetch(API_BASE + '/scan', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -639,7 +646,7 @@ async function cancelScan() {
 
     try {
         const token = localStorage.getItem('phoenix_token');
-        const response = await fetch('http://localhost:3000/cancel-scan', {
+        const response = await fetch(API_BASE + '/cancel-scan', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -685,7 +692,7 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
     const password = document.getElementById('loginPassword').value;
 
     try {
-        const response = await fetch('http://localhost:3000/login', {
+        const response = await fetch(API_BASE + '/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
@@ -771,7 +778,7 @@ async function loadDashboardData() {
         const token = localStorage.getItem('phoenix_token');
         if (!token) return;
 
-        const response = await fetch('http://localhost:3000/dashboard-stats', {
+        const response = await fetch(API_BASE + '/dashboard-stats', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const result = await response.json();
@@ -817,7 +824,7 @@ async function loadTrendChart(days = 30) {
             btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
         });
 
-        const response = await fetch(`http://localhost:3000/dashboard-trends?days=${days}`, {
+        const response = await fetch(`${API_BASE}/dashboard-trends?days=${days}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const result = await response.json();
@@ -996,7 +1003,7 @@ async function loadHistoryData(filters = {}) {
 
         const queryStr = params.toString() ? `?${params.toString()}` : '';
 
-        const response = await fetch(`http://localhost:3000/history${queryStr}`, {
+        const response = await fetch(`${API_BASE}/history${queryStr}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const result = await response.json();
@@ -1121,7 +1128,7 @@ async function compareSelectedScans() {
     showToast('Comparing scans...', 'info', 2000);
 
     try {
-        const response = await fetch(`http://localhost:3000/history/compare?scan1=${compareSelection[0]}&scan2=${compareSelection[1]}`, {
+        const response = await fetch(`${API_BASE}/history/compare?scan1=${compareSelection[0]}&scan2=${compareSelection[1]}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const result = await response.json();
@@ -1197,7 +1204,7 @@ async function deleteScan(scanId) {
 
     try {
         const token = localStorage.getItem('phoenix_token');
-        const response = await fetch(`http://localhost:3000/history/${scanId}`, {
+        const response = await fetch(`${API_BASE}/history/${scanId}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -1232,7 +1239,7 @@ async function viewScan(scanId) {
 
         showToast('Loading scan details...', 'info', 2000);
 
-        const response = await fetch(`http://localhost:3000/history/${scanId}`, {
+        const response = await fetch(`${API_BASE}/history/${scanId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const result = await response.json();
@@ -1380,7 +1387,7 @@ async function downloadAgentLogs() {
     if (!currentDetailScan || !currentDetailScan._id) return;
     try {
         const token = localStorage.getItem('phoenix_token');
-        const response = await fetch(`http://localhost:3000/scan/${currentDetailScan._id}/download-logs`, {
+        const response = await fetch(`${API_BASE}/scan/${currentDetailScan._id}/download-logs`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -1515,7 +1522,7 @@ document.getElementById('signupForm')?.addEventListener('submit', async (e) => {
     const password = document.getElementById('signupPassword').value;
 
     try {
-        const response = await fetch('http://localhost:3000/register', {
+        const response = await fetch(API_BASE + '/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
@@ -1615,7 +1622,7 @@ async function loadAccountData() {
     }
 
     try {
-        const response = await fetch('http://localhost:3000/me', {
+        const response = await fetch(API_BASE + '/me', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const result = await response.json();
@@ -1648,7 +1655,7 @@ async function changePassword() {
 
     try {
         const token = localStorage.getItem('phoenix_token');
-        const response = await fetch('http://localhost:3000/change-password', {
+        const response = await fetch(API_BASE + '/change-password', {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -1680,7 +1687,7 @@ async function loadAdminData() {
     if (!token) return;
 
     try {
-        const statsResponse = await fetch('http://localhost:3000/admin/system-stats', {
+        const statsResponse = await fetch(API_BASE + '/admin/system-stats', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const statsResult = await statsResponse.json();
@@ -1690,7 +1697,7 @@ async function loadAdminData() {
             document.getElementById('adminTotalScans').innerText = statsResult.data.totalScans;
         }
 
-        const usersResponse = await fetch('http://localhost:3000/admin/users', {
+        const usersResponse = await fetch(API_BASE + '/admin/users', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const usersResult = await usersResponse.json();
@@ -1815,7 +1822,7 @@ async function requestAIReport(scanId, buttonEl) {
     showToast('🤖 AI is analyzing your scan results... This may take a moment.', 'info', 8000);
 
     try {
-        const response = await fetch('http://localhost:3000/generate-ai-report', {
+        const response = await fetch(API_BASE + '/generate-ai-report', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -2182,7 +2189,7 @@ async function exportScanData(format) {
     try {
         showToast(`Preparing ${format.toUpperCase()} export...`, 'info', 2000);
         
-        const response = await fetch(`http://localhost:3000/history/${currentDetailScan._id}/export/${format}`, {
+        const response = await fetch(`${API_BASE}/history/${currentDetailScan._id}/export/${format}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 

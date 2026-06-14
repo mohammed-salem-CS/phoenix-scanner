@@ -26,7 +26,10 @@ const MIN_PASSWORD_LENGTH = 6;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 // ─── Python Bridge ──────────────────────────────────────────────────────────
-const PYTHON_EXE = process.env.PYTHON_EXE || path.join(AI_AGENTS_DIR, 'venv', 'Scripts', 'python.exe');
+const PYTHON_EXE = process.env.PYTHON_EXE
+    || (process.platform === 'win32'
+        ? path.join(AI_AGENTS_DIR, 'venv', 'Scripts', 'python.exe')
+        : 'python3');
 const SPECIALIZED_AGENTS_SCRIPT = path.join(AI_AGENTS_DIR, 'specialized_agents.py');
 
 // ─── Dirsearch ──────────────────────────────────────────────────────────────

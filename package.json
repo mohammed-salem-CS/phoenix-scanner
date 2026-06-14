@@ -4,7 +4,8 @@
   "description": "Hybrid AI-powered vulnerability scanner",
   "main": "backend/server.js",
   "scripts": {
-    "install-all": "npm install && cd backend && npm install && cd ai_agents && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
+    "install-all": "npm install && cd backend && npm install && cd ai_agents && python3 -m venv venv && venv/bin/pip install -r requirements.txt",
+    "install-all:win": "npm install && cd backend && npm install && cd ai_agents && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
     "start": "cd backend && node server.js"
   },
   "dependencies": {

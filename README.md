@@ -1,4 +1,4 @@
-# 🦅 Phoenix AI Security Platform
+#  Phoenix AI Security Platform
 
 <div align="center">
   <p><strong>Next-Generation Automated Web Vulnerability Scanner</strong></p>
@@ -7,30 +7,30 @@
 
 ---
 
-## 📖 Overview
+##  Overview
 
 **Phoenix** is a hybrid AI-powered web vulnerability scanner. It merges the speed and breadth of a traditional automated scanner with the contextual understanding of AI agents. Whether you want a quick check for common misconfigurations or a deep, AI-driven audit of your web application's security posture, Phoenix provides a comprehensive, unified platform.
 
-## ✨ Key Features
+##  Key Features
 
-- 🛡️ **Multi-Mode Scanning Engine:**
+-  **Multi-Mode Scanning Engine:**
   - **Script Engine:** High-speed deep crawling, payload injection, and passive/active analysis.
   - **AI Agent Mode:** Deep reasoning audit utilizing CrewAI orchestration.
   - **Hybrid Mode:** Integrated automated discovery combined with AI confirmation for minimal false positives.
-- 🎯 **Comprehensive Vulnerability Detection:**
+-  **Comprehensive Vulnerability Detection:**
   - **Injection Attacks:** SQLi, XSS (Reflected & Stored), Command Injection, LFI, Open Redirect.
   - **Misconfigurations:** Insecure CORS, Missing Security Headers, Insecure Cookies, SSL/TLS checks.
   - **Advanced Checks:** CSRF, Clickjacking, Directory Enumeration, Sensitive Information Disclosure.
-- ⚙️ **Professional Mode Configuration:**
+-  **Professional Mode Configuration:**
   - Fine-grained vulnerability targeting (select specific vulnerabilities to scan for).
   - WAF Evasion Levels (None, Basic, Advanced) with customized payload encoding.
   - Configurable request rates to prevent server overload or detection.
-- 📊 **Rich Dashboard & Reporting:**
+-  **Rich Dashboard & Reporting:**
   - Real-time scan progress and socket-based live updates.
   - Downloadable PDF reports, JSON/CSV exports, and AI-generated summary reports.
   - Scan history and side-by-side comparative analysis of different scans.
 
-## 🏗️ Architecture & Tech Stack
+##  Architecture & Tech Stack
 
 Phoenix is built using a modern decoupled architecture:
 
@@ -42,7 +42,7 @@ Phoenix is built using a modern decoupled architecture:
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 Follow these instructions to set up the project locally.
 
@@ -69,7 +69,7 @@ npm install
 Create a `.env` file in the `backend/` directory:
 ```env
 PORT=3000
-MONGODB_URI=mongodb://localhost:27017/phoenixDB
+MONGO_URI=mongodb://localhost:27017/phoenixDB
 JWT_SECRET=your_super_secret_jwt_key
 GEMINI_API_KEY=your_google_ai_key_here
 ```
@@ -102,15 +102,219 @@ pip install -r requirements.txt
 
 ---
 
-## 🐳 Docker Deployment (Optional)
+## 🐳 Docker Deployment
 
-Phoenix includes a `docker-compose.yml` for simplified deployment:
+### Quick Start (Local Docker)
+
 ```bash
-docker-compose up --build
+docker compose up --build -d
 ```
-This will spin up both the Node.js backend (on port `3000`) and a MongoDB instance automatically.
+This spins up the Node.js backend + MongoDB. Open `http://localhost:3000` in your browser.
 
-## 🤝 Contributing
+---
+
+## 🚀 Deploying to Hostinger VPS (Ubuntu)
+
+Full step-by-step guide to deploy Phoenix on a Hostinger VPS running Ubuntu.
+
+### Prerequisites
+
+- A **Hostinger VPS** running Ubuntu 22.04 or newer
+- A **domain name** pointed to your VPS IP address (configured via Hostinger DNS)
+- Your **Gemini API Key** (for AI features)
+- A terminal/SSH client (e.g., Windows Terminal, PuTTY, or VS Code Remote SSH)
+
+---
+
+### Step 1 — Connect to Your VPS via SSH
+
+```bash
+ssh root@your-server-ip
+```
+
+> If this is your first time, Hostinger provides the SSH credentials in your VPS dashboard under **"SSH Access"**.
+
+---
+
+### Step 2 — Install Docker & Docker Compose
+
+Run these commands to install Docker on Ubuntu:
+
+```bash
+# Update system packages
+sudo apt update && sudo apt upgrade -y
+
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+
+# Add your user to the docker group (avoids needing sudo)
+sudo usermod -aG docker $USER
+
+# Apply group changes (or log out and back in)
+newgrp docker
+
+# Verify installation
+docker --version
+docker compose version
+```
+
+---
+
+### Step 3 — Install Git and Clone the Project
+
+```bash
+# Install Git
+sudo apt install git -y
+
+# Clone the repository
+cd /home
+git clone https://github.com/your-username/phoenix-scanner.git
+cd phoenix-scanner
+```
+
+> **Alternative:** If your repo is private, use SSH keys or a personal access token:
+> ```bash
+> git clone https://<TOKEN>@github.com/your-username/phoenix-scanner.git
+> ```
+
+---
+
+### Step 4 — Create the Environment File
+
+Create a `.env` file in the **project root** directory (this is read by Docker Compose):
+
+```bash
+nano .env
+```
+
+Paste the following and replace the placeholder values:
+
+```env
+JWT_SECRET=replace_with_a_strong_random_secret
+GEMINI_API_KEY=your_actual_gemini_api_key
+```
+
+> **Tip:** Generate a strong JWT secret with: `openssl rand -hex 32`
+
+Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
+
+---
+
+### Step 5 — Build and Start the Application
+
+```bash
+# Build the Docker image (first time takes ~5–10 minutes)
+docker compose build
+
+# Start all services in the background
+docker compose up -d
+```
+
+Verify everything is running:
+
+```bash
+docker compose ps
+```
+
+You should see two containers running: `phoenix-backend` and `mongo`.
+
+Check the logs to confirm successful startup:
+
+```bash
+docker compose logs phoenix-backend
+```
+
+Look for:
+```
+Connected to MongoDB
+Server running on port 3000
+```
+
+---
+
+### Step 6 — Configure Firewall
+
+Allow traffic on port 3000:
+
+```bash
+sudo ufw allow 3000
+sudo ufw allow OpenSSH
+sudo ufw enable
+```
+
+---
+
+### Step 7 — Access Your Application
+
+Open your browser and navigate to:
+
+```
+http://your-domain.com:3000
+```
+
+Or using the VPS IP address:
+
+```
+http://your-server-ip:3000
+```
+
+You should see the Phoenix Scanner interface. Register an account and start scanning!
+
+---
+
+### Maintenance & Useful Commands
+
+```bash
+# View real-time logs
+docker compose logs -f phoenix-backend
+
+# Restart services
+docker compose restart
+
+# Stop all services
+docker compose down
+
+# Rebuild after code changes
+cd /home/phoenix-scanner
+git pull
+docker compose up -d --build
+
+# Access MongoDB shell
+docker compose exec mongo mongosh phoenixDB
+
+# Check disk usage
+docker system df
+
+# Clean up unused Docker resources
+docker system prune -f
+```
+
+---
+
+### Updating the Application
+
+When you push new changes to your GitHub repository:
+
+```bash
+cd /home/phoenix-scanner
+git pull origin main
+docker compose up -d --build
+```
+
+---
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| **"Cannot connect to MongoDB"** | Check if mongo container is running: `docker compose ps` |
+| **Page shows "Cannot GET /"** | The frontend files might not have copied. Rebuild: `docker compose up -d --build` |
+| **AI scan fails** | Verify `GEMINI_API_KEY` is set correctly in `.env` |
+| **Port 3000 not accessible** | Check firewall: `sudo ufw status` and ensure port 3000 is allowed |
+| **Container keeps restarting** | Check logs: `docker compose logs phoenix-backend` |
+| **"Module not found" errors** | Rebuild from scratch: `docker compose build --no-cache` |
+
+##  Contributing
 
 Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 1. Fork the Project
@@ -119,7 +323,7 @@ Contributions are what make the open-source community such an amazing place to l
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 

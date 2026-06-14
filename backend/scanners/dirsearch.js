@@ -1,7 +1,7 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { DIRSEARCH_PATH } = require('../config');
+const { DIRSEARCH_PATH, PYTHON_EXE } = require('../config');
 
 
 async function runDirsearch(targetUrl) {
@@ -11,7 +11,7 @@ async function runDirsearch(targetUrl) {
         const reportPath = path.join(__dirname, reportFile);
 
         // Command structure: python dirsearch.py -u [url] -e [extensions] --json-report [path]
-        const command = `python "${DIRSEARCH_PATH}" -u ${targetUrl} -e php,html,js,txt --json-report "${reportPath}"`;
+        const command = `"${PYTHON_EXE}" "${DIRSEARCH_PATH}" -u ${targetUrl} -e php,html,js,txt --json-report "${reportPath}"`;
 
         console.log(`[Phoenix]  Starting Directory Discovery...`);
 

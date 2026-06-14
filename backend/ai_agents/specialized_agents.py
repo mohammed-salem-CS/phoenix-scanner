@@ -25,6 +25,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_DIR = os.path.join(SCRIPT_DIR, "tools")
 PYTHON_EXE = sys.executable
 
+def _tool_path(name):
+    """Resolve tool binary path: on Windows use TOOLS_DIR/*.exe, on Linux use system PATH."""
+    if sys.platform == "win32":
+        return os.path.join(TOOLS_DIR, f"{name}.exe")
+    return name  # installed to PATH in Docker
+
 # Ensure Wordlists exist
 WORDLISTS_DIR = os.path.join(SCRIPT_DIR, "wordlists")
 LFI_WORDLIST = os.path.join(WORDLISTS_DIR, "lfi-payloads.txt")
@@ -222,7 +228,7 @@ def historical_urls(domain: str) -> str:
         # GAU uses double-dash flags; strip protocol from domain if present
         clean_domain = domain.replace("https://", "").replace("http://", "").rstrip("/")
         cmd = [
-            os.path.join(TOOLS_DIR, "gau.exe"),
+            _tool_path("gau"),
             "--threads", "5", "--timeout", "20",
             clean_domain
         ]
@@ -257,7 +263,7 @@ def fetch_site_data(url: str) -> str:
 def dalfox_xss_scan(url: str) -> str:
     """Runs Dalfox XSS scanner with context-aware payloads."""
     try:
-        cmd = [os.path.join(TOOLS_DIR, "dalfox.exe"), "url", url, "--format", "json", "--silence", "--timeout", "8", "--worker", "5"]
+        cmd = [_tool_path("dalfox"), "url", url, "--format", "json", "--silence", "--timeout", "8", "--worker", "5"]
         if SESSION_COOKIE_STR:
             cmd.extend(["--header", f"Cookie: {SESSION_COOKIE_STR}"])
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
@@ -269,7 +275,8 @@ def dalfox_xss_scan(url: str) -> str:
 def kxss_reflection_check(url: str) -> str:
     """Quickly checks which parameters reflect user input."""
     try:
-        cmd = f'echo {url} | "{os.path.join(TOOLS_DIR, "kxss.exe")}"'
+        kxss_bin = _tool_path("kxss")
+        cmd = f'echo {url} | "{kxss_bin}"'
         res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
         return res.stdout.strip() if res.stdout.strip() else "No reflection found."
     except Exception as e: return f"KXSS Error: {str(e)}"
@@ -296,7 +303,7 @@ def ffuf_lfi_fuzz(url: str, parameter: str) -> str:
     """Fuzzes a parameter with LFI payloads using ffuf."""
     try:
         fuzz_url = f"{url}&{parameter}=FUZZ" if "?" in url else f"{url}?{parameter}=FUZZ"
-        cmd = [os.path.join(TOOLS_DIR, "ffuf.exe"), "-u", fuzz_url, "-w", LFI_WORDLIST, "-mc", "200", "-json", "-silent"]
+        cmd = [_tool_path("ffuf"), "-u", fuzz_url, "-w", LFI_WORDLIST, "-mc", "200", "-json", "-silent"]
         if SESSION_COOKIE_STR:
             cmd.extend(["-H", f"Cookie: {SESSION_COOKIE_STR}"])
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=45, stdin=subprocess.DEVNULL)
@@ -316,9 +323,9 @@ def interactsh_ssrf_test(url: str, parameter: str) -> str:
     proc = None
     try:
         import threading
-        interactsh_path = os.path.join(TOOLS_DIR, "interactsh-client.exe")
+        interactsh_bin = _tool_path("interactsh-client")
         proc = subprocess.Popen(
-            [interactsh_path, "-json", "-n", "1", "-poll-interval", "2"],
+            [interactsh_bin, "-json", "-n", "1", "-poll-interval", "2"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL
         )
 
@@ -394,7 +401,7 @@ def arjun_param_discovery(url: str, method: str) -> str:
 def nuclei_scan(url: str, tags: str) -> str:
     """Runs Nuclei scanner."""
     try:
-        cmd = [os.path.join(TOOLS_DIR, "nuclei.exe"), "-u", url, "-json", "-silent", "-tags", tags, "-rl", "30", "-c", "10"]
+        cmd = [_tool_path("nuclei"), "-u", url, "-json", "-silent", "-tags", tags, "-rl", "30", "-c", "10"]
         if SESSION_COOKIE_STR:
             cmd.extend(["-H", f"Cookie: {SESSION_COOKIE_STR}"])
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)

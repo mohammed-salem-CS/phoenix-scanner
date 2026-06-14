@@ -1,27 +1,28 @@
-version: '3.8'
-
 services:
   phoenix-backend:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_started
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/phoenixDB
-      - JWT_SECRET=phoenix_docker_secret
-    volumes:
-      - ./backend:/app/backend
-      - ./frontend:/app/frontend
+      - MONGO_URI=mongodb://mongo:27017/phoenixDB
+      - JWT_SECRET=${JWT_SECRET:-phoenix_docker_secret_change_me}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - PYTHON_EXE=python3
+      - PORT=3000
+    restart: unless-stopped
 
   mongo:
-    image: mongo:latest
+    image: mongo:7
     ports:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+    restart: unless-stopped
 
 volumes:
   mongo-data:

@@ -12,6 +12,7 @@
  */
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -64,7 +65,16 @@ app.use(adminRoutes);      // GET /admin/system-stats, GET /admin/users
 app.use(reportRoutes);     // POST /generate-ai-report
 app.use(dashboardRoutes);  // GET /dashboard-stats, GET /dashboard-trends
 
+// ─── Serve Frontend Static Files ────────────────────────────────────────────
+const frontendPath = path.join(__dirname, '..', 'frontend');
+app.use(express.static(frontendPath));
+
+// Catch-all: serve index.html for any non-API route (SPA support)
+app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+});
+
 // ─── Start Server ───────────────────────────────────────────────────────────
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 });
