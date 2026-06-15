@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import re
 import warnings
 import time
 import subprocess
@@ -250,12 +251,14 @@ def historical_urls(domain: str) -> str:
 
 @tool("fetch_site_data")
 def fetch_site_data(url: str) -> str:
-    """Extracts HTML forms, inputs, and basic metadata."""
+    """Extracts HTML forms, inputs, basic metadata, AND the page HTML body (for JavaScript source-to-sink analysis)."""
     try:
         res = requests.get(url, timeout=10, verify=False, headers=get_auth_headers())
         soup = BeautifulSoup(res.text, 'html.parser')
         forms = [{"action": f.get('action'), "method": f.get('method', 'GET').upper(), "inputs": [i.get('name') for i in f.find_all('input') if i.get('name')]} for f in soup.find_all('form')]
-        return json.dumps({"status": res.status_code, "forms": forms, "headers": dict(res.headers)})
+        # Include truncated body so DOM XSS agent can analyze JavaScript source-to-sink flows
+        body_text = res.text[:4000] if res.text else ""
+        return json.dumps({"status": res.status_code, "forms": forms, "headers": dict(res.headers), "body": body_text})
     except Exception as e: return f"Fetch Error: {str(e)}"
 
 # --- XSS TOOLS ---
@@ -266,35 +269,63 @@ def dalfox_xss_scan(url: str) -> str:
         cmd = [_tool_path("dalfox"), "url", url, "--format", "json", "--silence", "--timeout", "8", "--worker", "5"]
         if SESSION_COOKIE_STR:
             cmd.extend(["--header", f"Cookie: {SESSION_COOKIE_STR}"])
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-        findings = [json.loads(line) for line in res.stdout.strip().split('\n') if line]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+        # Parse JSON lines safely — Dalfox may output non-JSON status messages
+        findings = []
+        for line in res.stdout.strip().split('\n'):
+            if line.strip():
+                try:
+                    findings.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass  # Skip non-JSON status lines from Dalfox
         return json.dumps({"findings": findings[:10]})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"findings": [], "error": "Dalfox timed out after 120s"})
     except Exception as e: return f"Dalfox Error: {str(e)}"
 
 @tool("kxss_reflection_check")
 def kxss_reflection_check(url: str) -> str:
-    """Quickly checks which parameters reflect user input."""
+    """Quickly checks which parameters reflect user input and which special characters survive unencoded."""
     try:
         kxss_bin = _tool_path("kxss")
-        cmd = f'echo {url} | "{kxss_bin}"'
+        # Use platform-appropriate piping to avoid shell quoting issues
+        if sys.platform == "win32":
+            # PowerShell-safe: use Write-Output to pipe URL into kxss
+            cmd = f'powershell -Command "Write-Output \'{url}\' | & \'\'{kxss_bin}\'\' "'
+        else:
+            cmd = f'echo "{url}" | "{kxss_bin}"'
         res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-        return res.stdout.strip() if res.stdout.strip() else "No reflection found."
+        output = res.stdout.strip()
+        if not output:
+            # Fallback: run kxss directly with input via stdin
+            proc = subprocess.run(
+                [kxss_bin], input=url + "\n", capture_output=True, text=True, timeout=30
+            )
+            output = proc.stdout.strip()
+        return output if output else "No reflection found."
     except Exception as e: return f"KXSS Error: {str(e)}"
 
 # --- SQLI TOOLS ---
 @tool("sqlmap_scan")
-def sqlmap_scan(url: str) -> str:
-    """Runs SQLMap against the URL."""
+def sqlmap_scan(url: str, data: str = "", method: str = "GET") -> str:
+    """Runs SQLMap against the URL. For POST endpoints, provide form data as 'param1=val1&param2=val2' in the data argument and set method to POST."""
     try:
         sqlmap_path = os.path.join(TOOLS_DIR, "SQLMap", "sqlmap.py")
-        cmd = [PYTHON_EXE, sqlmap_path, "-u", url, "--batch", "--level=1", "--risk=1", "--random-agent", "--threads=3", "--timeout=8"]
+        cmd = [PYTHON_EXE, sqlmap_path, "-u", url, "--batch", "--level=2", "--risk=2", "--random-agent", "--threads=3", "--timeout=8"]
+        if data:
+            cmd.extend(["--data", data])
+        if method.upper() != "GET":
+            cmd.extend(["--method", method.upper()])
         if SESSION_COOKIE_STR:
             cmd.extend(["--cookie", SESSION_COOKIE_STR])
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL)
-        if "is vulnerable" in res.stdout or "injectable" in res.stdout:
-            lines = [l for l in res.stdout.split('\n') if 'Payload:' in l or 'back-end DBMS:' in l or 'Type:' in l]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+        output = res.stdout + res.stderr
+        if "is vulnerable" in output or "injectable" in output:
+            lines = [l for l in output.split('\n') if 'Payload:' in l or 'back-end DBMS:' in l or 'Type:' in l or 'injectable' in l.lower()]
             return f"SQLi Confirmed.\n" + "\n".join(lines)
         return "No SQLi found by SQLMap."
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "SQLMap timed out after 120s", "result": "inconclusive"})
     except Exception as e: return f"SQLMap Error: {str(e)}"
 
 # --- LFI TOOLS ---
@@ -329,47 +360,77 @@ def interactsh_ssrf_test(url: str, parameter: str) -> str:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL
         )
 
-        # Collect output lines in a thread to avoid blocking
+        # Collect output lines from BOTH stdout AND stderr in threads to avoid blocking
         output_lines = []
-        def reader():
+        stderr_lines = []
+        def stdout_reader():
             try:
                 for line in proc.stdout:
                     output_lines.append(line.strip())
             except: pass
-        t = threading.Thread(target=reader, daemon=True)
-        t.start()
+        def stderr_reader():
+            try:
+                for line in proc.stderr:
+                    stderr_lines.append(line.strip())
+            except: pass
+        t_out = threading.Thread(target=stdout_reader, daemon=True)
+        t_err = threading.Thread(target=stderr_reader, daemon=True)
+        t_out.start()
+        t_err.start()
 
-        # Wait up to 8 seconds for the callback URL to appear
+        # Wait up to 20 seconds for the callback URL to appear (increased from 8s)
         callback_url = None
-        deadline = time.time() + 8
+        deadline = time.time() + 20
         while time.time() < deadline:
-            for line in output_lines:
-                if "oast" in line or "interact" in line:
-                    try: callback_url = json.loads(line).get("interactsh_url", "")
-                    except: callback_url = line
-                    break
+            # Search both stdout and stderr for the callback URL
+            all_lines = output_lines + stderr_lines
+            for line in all_lines:
+                if not line:
+                    continue
+                # Try JSON parsing first (interactsh outputs JSON with url key)
+                if ".oast." in line or "interact" in line or "canary" in line:
+                    try:
+                        parsed = json.loads(line)
+                        callback_url = parsed.get("interactsh_url", parsed.get("url", ""))
+                        if callback_url:
+                            break
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                    # Fallback: extract URL-like string from plain text (e.g. [INF] log lines)
+                    match = re.search(r'([a-z0-9]+\.oast\.[a-z.]+)', line)
+                    if match:
+                        callback_url = match.group(1)
+                        break
+                    match = re.search(r'([a-z0-9]+\.interact\.sh)', line)
+                    if match:
+                        callback_url = match.group(1)
+                        break
             if callback_url:
                 break
             time.sleep(0.5)
 
         if not callback_url:
             proc.kill()
-            return json.dumps({"error": "Interactsh could not generate callback URL within 8s", "ssrf_confirmed": False})
+            # Include stderr for debugging
+            debug_info = "; ".join(stderr_lines[:3]) if stderr_lines else "no stderr output"
+            return json.dumps({"error": f"Interactsh could not generate callback URL within 20s. Debug: {debug_info}", "ssrf_confirmed": False})
 
         # Inject the callback URL into the target parameter
         payload_url = f"http://{callback_url}"
         try:
             sep = "&" if "?" in url else "?"
-            requests.get(f"{url}{sep}{parameter}={payload_url}", timeout=8, verify=False, headers=get_auth_headers())
+            requests.get(f"{url}{sep}{parameter}={payload_url}", timeout=10, verify=False, headers=get_auth_headers())
         except: pass
 
         # Wait briefly for any server-side callback to arrive
-        time.sleep(5)
+        time.sleep(6)
 
         # Check for interactions in the collected output
         proc.kill()
-        t.join(timeout=1)
-        interactions = [l for l in output_lines if "remote-address" in l or '"protocol"' in l]
+        t_out.join(timeout=2)
+        t_err.join(timeout=2)
+        all_output = output_lines + stderr_lines
+        interactions = [l for l in all_output if "remote-address" in l or '"protocol"' in l]
         return json.dumps({
             "ssrf_confirmed": len(interactions) > 0,
             "callback_url": payload_url,
@@ -404,25 +465,52 @@ def nuclei_scan(url: str, tags: str) -> str:
         cmd = [_tool_path("nuclei"), "-u", url, "-json", "-silent", "-tags", tags, "-rl", "30", "-c", "10"]
         if SESSION_COOKIE_STR:
             cmd.extend(["-H", f"Cookie: {SESSION_COOKIE_STR}"])
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-        findings = [json.loads(line) for line in res.stdout.strip().split('\n') if line]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL)
+        # Parse JSON lines safely — Nuclei may output non-JSON lines
+        findings = []
+        for line in res.stdout.strip().split('\n'):
+            if line.strip():
+                try:
+                    findings.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
         return json.dumps({"findings": findings[:10]})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"findings": [], "error": "Nuclei timed out after 90s"})
     except Exception as e: return f"Nuclei Error: {str(e)}"
 
 # --- GENERAL ---
 @tool("active_payload_tester")
 def active_payload_tester(url: str, method: str, parameter: str, payload: str) -> str:
-    """Sends a payload to a parameter and checks reflection/response."""
+    """Sends a payload to a parameter and returns status, reflection check, response time, AND a body snippet for analysis.
+    The body_snippet field contains the first 500 chars of the response — use it to check for SQL errors, file contents, internal HTML, etc."""
     try:
         time.sleep(0.5)
         params = {parameter: payload}
         hdrs = get_auth_headers()
         start_time = time.time()
         if method.upper() == "POST":
-            res = requests.post(url, data=params, timeout=10, verify=False, headers=hdrs)
+            res = requests.post(url, data=params, timeout=10, verify=False, headers=hdrs, allow_redirects=False)
+        elif method.upper() == "DELETE":
+            res = requests.delete(url, params=params, timeout=10, verify=False, headers=hdrs, allow_redirects=False)
+        elif method.upper() == "PUT":
+            res = requests.put(url, data=params, timeout=10, verify=False, headers=hdrs, allow_redirects=False)
         else:
-            res = requests.get(url, params=params, timeout=10, verify=False, headers=hdrs)
-        return json.dumps({"status": res.status_code, "reflected": payload in res.text, "time": f"{time.time() - start_time:.2f}s"})
+            res = requests.get(url, params=params, timeout=10, verify=False, headers=hdrs, allow_redirects=False)
+        elapsed = time.time() - start_time
+        body_snippet = res.text[:500] if res.text else ""
+        # Build response headers dict for redirect detection
+        resp_headers = {}
+        if "Location" in res.headers:
+            resp_headers["Location"] = res.headers["Location"]
+        return json.dumps({
+            "status": res.status_code,
+            "reflected": payload in res.text,
+            "time": f"{elapsed:.2f}s",
+            "body_snippet": body_snippet,
+            "content_length": len(res.text),
+            "response_headers": resp_headers
+        })
     except Exception as e: return f"Test failed: {str(e)}"
 
 
@@ -476,8 +564,15 @@ sqli_agent = Agent(
     goal='Detect and CONFIRM SQL injection vulnerabilities on {target_url} using SQLMap and manual verification.',
     backstory='''You are a database security specialist. Your methodology:
 Step 1 — Parameter Selection: From the recon report, identify HIGH-VALUE parameters: id, search, username, sort, filter, category, user, order, item, product, page.
-Step 2 — Quick Error Probe: Use active_payload_tester to send a single quote (') to each parameter. Look for SQL error signatures in the response (MySQL, PostgreSQL, MSSQL, SQLite errors).
-Step 3 — SQLMap Deep Scan: For EVERY suspect URL with parameters, run sqlmap_scan. SQLMap tests all techniques: Error-based, Boolean-blind, Union, Stacked, Time-based. It handles WAF evasion automatically.
+Step 2 — Quick Error Probe: Use active_payload_tester to send a single quote (') to each parameter. Check the body_snippet for SQL error signatures:
+  MySQL: "You have an error in your SQL syntax", "mysql_fetch"
+  PostgreSQL: "unterminated quoted string", "pg_query"
+  MSSQL: "Unclosed quotation mark", "ODBC SQL Server Driver"
+  SQLite: "SQLITE_ERROR", "unrecognized token"
+Step 3 — SQLMap Deep Scan: For EVERY suspect URL, run sqlmap_scan.
+  For GET parameters: sqlmap_scan(url="http://target/page?param=value")
+  For POST forms: sqlmap_scan(url="http://target/action", data="param1=val1&param2=val2", method="POST")
+  SQLMap tests: Error-based, Boolean-blind, Union, Stacked, Time-based. It handles WAF evasion.
 Step 4 — Analyze SQLMap Output: Check for:
   - "is vulnerable" or "injectable" → CONFIRMED SQLi
   - "back-end DBMS:" → Database type identified
@@ -485,9 +580,11 @@ Step 4 — Analyze SQLMap Output: Check for:
 Step 5 — Manual Time-Based Fallback: If SQLMap finds nothing, use active_payload_tester with time-based payloads:
   MySQL: ' OR SLEEP(5)-- -
   PostgreSQL: ' OR pg_sleep(5)-- -
-  CONFIRMED if response_time >= 5 seconds
+  CONFIRMED if response_time >= 5 seconds (check the "time" field)
 CRITICAL RULES:
+- ALWAYS test POST login/search forms using sqlmap_scan with data= parameter
 - ALWAYS run sqlmap_scan on URLs that have query parameters
+- Use the body_snippet from active_payload_tester to look for SQL error messages
 - Extract the DBMS type and exact payload for the report
 - NEVER report SQLi without SQLMap confirmation or measurable time delay''',
     llm=llm_pro,
@@ -505,9 +602,10 @@ Your methodology:
 Step 1 — Parameter Identification: From recon, find parameters that imply file handling: page, file, doc, path, template, include, lang, view, content, load.
 Step 2 — Automated Fuzzing: Use ffuf_lfi_fuzz with the parameter name. This tests 30+ path traversal payloads including encoding bypasses.
 Step 3 — Manual Verification: Use active_payload_tester to confirm hits:
-  Linux: Send ../../../../etc/passwd → Look for "root:x:0:0:" in response
-  Windows: Send ..\\..\\..\\..\\windows\\win.ini → Look for "[extensions]" in response
-  PHP: Send php://filter/convert.base64-encode/resource=index.php → Look for base64 output
+  Linux: Send ../../../../etc/passwd → Check body_snippet for "root:x:0:0:" 
+  Windows: Send ..\\..\\..\\..\\windows\\win.ini → Check body_snippet for "[extensions]"
+  Java: Send ../../../../WEB-INF/web.xml → Check body_snippet for "<web-app"
+  PHP: Send php://filter/convert.base64-encode/resource=index.php → Check body_snippet for base64 output
 Step 4 — Bypass Techniques: If basic payloads fail, try:
   ....//....//etc/passwd (double-dot bypass)
   ..%2f..%2f..%2fetc%2fpasswd (URL encoding)
@@ -518,12 +616,13 @@ Step 5 — Find redirect parameters: url, redirect, next, dest, return, returnUr
 Step 6 — Test with active_payload_tester:
   Basic: https://evil.com, //evil.com
   Bypass: https://target.com@evil.com, ///evil.com
-  CONFIRMED if status 301/302 with Location header pointing to external domain
+  CONFIRMED if status 301/302 AND response_headers contains "Location" pointing to external domain
 
 CRITICAL RULES:
 - Use ffuf_lfi_fuzz FIRST for automated coverage
-- Manually verify ANY ffuf hit with active_payload_tester
-- For Open Redirect, check the response status code (must be 3xx)''',
+- Manually verify ANY ffuf hit — check the body_snippet for actual file contents
+- A 500 error on path traversal is suspicious (may indicate processing) — try more bypasses
+- For Open Redirect, check response_headers.Location (must contain external domain)''',
     llm=llm_pro,
     tools=[ffuf_lfi_fuzz, active_payload_tester],
     allow_delegation=False,
@@ -534,16 +633,16 @@ ssrf_agent = Agent(
     role='Server-Side Request Forgery (SSRF) Specialist',
     goal='Detect SSRF vulnerabilities on {target_url} by confirming the server makes outbound requests to attacker-controlled or internal URLs.',
     backstory='''You are an SSRF exploitation expert. Your methodology:
-Step 1 — Identify SSRF-Prone Parameters: Focus on params that accept URLs: url, link, src, href, target, proxy, fetch, load, request, image_url, avatar_url, webhook, callback, preview, pdf_url, import_url, api_url.
+Step 1 — Identify SSRF-Prone Parameters: Focus on params that accept URLs or hostnames: url, link, src, href, target, proxy, fetch, load, request, image_url, avatar_url, webhook, callback, preview, pdf_url, import_url, api_url, HostName, host, server.
 Step 2 — Blind SSRF with Interactsh: Use interactsh_ssrf_test with the parameter name. This generates a unique callback URL and checks if the server makes an outbound request.
   If ssrf_confirmed=true → The server fetched our URL → CONFIRMED BLIND SSRF
 Step 3 — Direct Internal Probing: Use active_payload_tester to inject internal URLs:
-  http://127.0.0.1 → Check for internal web server content
-  http://169.254.169.254/latest/meta-data/ → AWS metadata (CRITICAL if found)
+  http://127.0.0.1 → Check body_snippet for internal web server content (different from normal response)
+  http://169.254.169.254/latest/meta-data/ → Check body_snippet for AWS metadata (CRITICAL if found)
   http://metadata.google.internal/computeMetadata/v1/ → GCP metadata
-Step 4 — Internal Port Scanning: Test different ports:
+Step 4 — Internal Port Scanning: Test different ports and COMPARE content_length values:
   http://127.0.0.1:22 (SSH), http://127.0.0.1:3306 (MySQL), http://127.0.0.1:6379 (Redis)
-  CONFIRMED if different response sizes/content per port
+  CONFIRMED if different content_length values per port (server is fetching and returning different content)
 Step 5 — Bypass Techniques (if basic blocked):
   Decimal IP: http://2130706433 (=127.0.0.1)
   IPv6: http://[::1]
@@ -552,7 +651,9 @@ Step 5 — Bypass Techniques (if basic blocked):
 CRITICAL RULES:
 - ALWAYS try interactsh_ssrf_test first for blind SSRF detection
 - Cloud metadata access = CRITICAL severity
-- URL simply echoed in HTML is NOT SSRF (must be fetched server-side)''',
+- Check body_snippet for actual internal content — "reflected":true alone is NOT proof of SSRF
+- Compare content_length across different internal IPs/ports — varying sizes suggest server-side fetching
+- URL simply echoed in HTML is NOT SSRF (the body_snippet must contain fetched content)''',
     llm=llm_pro,
     tools=[interactsh_ssrf_test, active_payload_tester],
     allow_delegation=False,
@@ -564,10 +665,10 @@ dom_xss_agent = Agent(
     goal='Detect DOM-based XSS vulnerabilities on {target_url} by analyzing client-side JavaScript source-to-sink data flows.',
     backstory='''You are a client-side security expert. DOM XSS is different from reflected XSS — the payload NEVER reaches the server.
 Your methodology:
-Step 1 — Fetch Page Source: Use fetch_site_data to get the full HTML including inline JavaScript.
-Step 2 — Identify SOURCES (user-controlled inputs): Look in the HTML/JS for:
+Step 1 — Fetch Page Source: Use fetch_site_data to get the full HTML including inline JavaScript. The tool returns a "body" field containing the page HTML — analyze this for JavaScript code.
+Step 2 — Identify SOURCES (user-controlled inputs): Search the "body" field for:
   location.hash, location.search, location.href, document.URL, document.referrer, window.name, postMessage, localStorage, sessionStorage
-Step 3 — Identify SINKS (dangerous output functions): Look for:
+Step 3 — Identify SINKS (dangerous output functions): Search the "body" field for:
   document.write, document.writeln, innerHTML, outerHTML, insertAdjacentHTML, eval(), setTimeout(string), setInterval(string), Function(), jQuery .html(), .append()
 Step 4 — Flow Analysis: A vulnerability exists ONLY if a SOURCE feeds directly into a SINK without sanitization.
   EXPLOITABLE if: No DOMPurify, no encodeURIComponent, no escapeHtml between source and sink
@@ -578,8 +679,10 @@ Step 5 — Construct Trigger URLs and Test:
 Step 6 — Verify DOM-Specific Nature: If "reflected": true → it's REFLECTED XSS (not DOM). If "reflected": false BUT source-to-sink flow exists → CONFIRMED DOM XSS.
 
 CRITICAL RULES:
+- You MUST read the "body" field from fetch_site_data and find actual JavaScript code containing sources and sinks
+- Do NOT guess or assume — you must cite the exact JavaScript line from the body that shows the flow
 - innerHTML alone is NOT a vulnerability — there must be a user-controlled source feeding it
-- ALWAYS check if sanitization (DOMPurify) exists
+- ALWAYS check if sanitization (DOMPurify) exists in the body
 - DOM XSS payload should NOT be reflected by the server''',
     llm=llm_pro,
     tools=[fetch_site_data, active_payload_tester],
@@ -622,19 +725,19 @@ validator_agent = Agent(
     backstory='''You are the final quality gate. Your job is to filter raw findings into verified vulnerabilities.
 Do NOT run any tools — just analyze the evidence already provided by the attack agents.
 Step 1 — Evidence Verification per type:
-  XSS: REQUIRE payload reflected in executable context. DISCARD if HTML-encoded or in comment.
-  SQLi: REQUIRE DB error, time delay >=4s, or boolean diff. DISCARD if no error/timing.
-  LFI: REQUIRE file content (root:x:0:0). DISCARD if 404 or no content.
-  Open Redirect: REQUIRE 3xx + Location header to external domain.
-  SSRF: REQUIRE internal content in response or confirmed callback. DISCARD if URL just reflected.
-  DOM XSS: REQUIRE source-to-sink flow with reflected:false. DISCARD if sanitized.
+  XSS: REQUIRE payload reflected in executable context (check body_snippet). DISCARD if HTML-encoded or in comment.
+  SQLi: REQUIRE DB error in body_snippet, time delay >=4s, or SQLMap "is vulnerable". DISCARD if no error/timing.
+  LFI: REQUIRE file content in body_snippet (root:x:0:0 or [extensions]). DISCARD if 404 or no content.
+  Open Redirect: REQUIRE 3xx status + Location header pointing to external domain in response_headers.
+  SSRF: REQUIRE internal content in body_snippet OR interactsh ssrf_confirmed=true. DISCARD if URL just reflected without server-side fetch evidence.
+  DOM XSS: REQUIRE actual JavaScript code citation showing source-to-sink flow AND reflected:false. DISCARD if agent only guessed without citing code.
   API: REQUIRE data without auth or mass assignment accepted. DISCARD if 401/403.
 Step 2 — Severity Assignment:
   CRITICAL: SQLi with data extraction, LFI reading system files, SSRF with cloud metadata, Broken Auth
-  HIGH: Reflected XSS, Blind SQLi confirmed, SSRF internal port, DOM XSS confirmed
-  MEDIUM: Open Redirect non-auth, API docs exposure
+  HIGH: Reflected XSS, Blind SQLi confirmed, SSRF with callback or internal content, DOM XSS with cited code flow
+  MEDIUM: Open Redirect confirmed with 3xx, API docs exposure, SSRF without full confirmation
   LOW: Verbose errors, Self-XSS
-  DISCARD: Unconfirmed/potential findings
+  DISCARD: Unconfirmed/potential findings, guessed vulnerabilities without tool evidence
 Step 3 — Deduplicate — same vuln on same parameter = one entry.
 Step 4 — Output ONLY a raw JSON array. No markdown, no backticks, no preamble.
 Each object: {"type":"","name":"","severity":"Critical|High|Medium|Low","location":"","description":"","evidence":""}''',
@@ -671,10 +774,11 @@ xss_task = Task(
 sqli_task = Task(
     description='''Test {target_url} for SQL Injection based on the recon report:
 1. Identify all endpoints with query parameters (especially id, search, user, category, sort, filter).
-2. For each endpoint with parameters, run sqlmap_scan with the full URL including parameters.
-3. If SQLMap reports "is vulnerable", extract the DBMS type and payload from the output.
-4. If SQLMap finds nothing, use active_payload_tester to send a single quote (') and check for SQL errors.
-5. As a last resort, test time-based: send "1' OR SLEEP(5)-- -" and check if response_time > 5s.''',
+2. For GET endpoints: run sqlmap_scan with the full URL including query parameters.
+3. For POST forms (login, search, feedback): run sqlmap_scan with url= set to the form action URL, data= set to the form fields (e.g. "uid=test&passw=test"), and method="POST".
+4. If SQLMap reports "is vulnerable", extract the DBMS type and payload from the output.
+5. If SQLMap finds nothing, use active_payload_tester to send a single quote (') and check body_snippet for SQL error messages.
+6. As a last resort, test time-based: send "1' OR SLEEP(5)-- -" and check if the "time" field shows > 5s.''',
     expected_output="List of verified SQLi vulnerabilities with injection type, DBMS, and working payload.",
     agent=sqli_agent,
     context=[recon_task]
@@ -682,36 +786,39 @@ sqli_task = Task(
 
 lfi_task = Task(
     description='''Test {target_url} for LFI and Open Redirect based on the recon report:
-1. Identify parameters suggesting file handling (page, file, doc, path, template, include, lang, view).
+1. Identify parameters suggesting file handling (page, file, doc, path, template, include, lang, view, content, cfile).
 2. For each file parameter, run ffuf_lfi_fuzz with the parameter name.
-3. Manually verify any ffuf hits using active_payload_tester — look for "root:x:0:0:" or "[extensions]".
-4. For redirect parameters (url, redirect, next, dest, return, goto), test Open Redirect:
-   Use active_payload_tester with payload "https://evil.com" — CONFIRMED if status 301/302.''',
-    expected_output="List of verified LFI and Open Redirect vulnerabilities with payload and file content evidence.",
+3. Manually verify hits using active_payload_tester — check the body_snippet field for "root:x:0:0:", "[extensions]", or "<web-app".
+4. If you get 500 errors with path traversal payloads, try encoding bypasses (....//....//etc/passwd, ..%2f..%2f, ..%252f).
+5. For redirect parameters (url, redirect, next, dest, return, goto), test Open Redirect:
+   Use active_payload_tester with payload "https://evil.com" — check response_headers for Location header.''',
+    expected_output="List of verified LFI and Open Redirect vulnerabilities with payload and file content evidence from body_snippet.",
     agent=lfi_agent,
     context=[recon_task]
 )
 
 ssrf_task = Task(
     description='''Test {target_url} for SSRF based on the recon report:
-1. Identify parameters that accept URLs (url, link, src, fetch, proxy, webhook, callback, preview, image_url).
-2. For each URL parameter, run interactsh_ssrf_test with the parameter name.
-3. If interactsh confirms callback, report as CONFIRMED BLIND SSRF.
-4. Also use active_payload_tester to inject http://169.254.169.254/latest/meta-data/ — if response contains AWS metadata, severity is CRITICAL.
-5. Try internal ports: inject http://127.0.0.1:22, :3306, :6379 and compare responses.''',
-    expected_output="List of verified SSRF vulnerabilities with callback evidence or internal content proof.",
+1. Identify parameters that accept URLs or hostnames (url, link, src, fetch, proxy, webhook, callback, preview, image_url, HostName, host).
+2. For each URL/host parameter, run interactsh_ssrf_test with the parameter name.
+3. If interactsh confirms callback (ssrf_confirmed=true), report as CONFIRMED BLIND SSRF.
+4. Use active_payload_tester to inject http://169.254.169.254/latest/meta-data/ — check body_snippet for AWS metadata. If found = CRITICAL.
+5. Try internal ports: inject http://127.0.0.1:22, :3306, :6379 and compare content_length values across responses.
+6. IMPORTANT: "reflected":true alone does NOT prove SSRF — you MUST check body_snippet for actual fetched content from internal services.''',
+    expected_output="List of verified SSRF vulnerabilities with callback evidence or body_snippet showing internal content.",
     agent=ssrf_agent,
     context=[recon_task]
 )
 
 dom_xss_task = Task(
     description='''Analyze {target_url} for DOM-based XSS:
-1. Use fetch_site_data to get the full page HTML and JavaScript.
-2. Search the HTML/JS for SOURCES: location.hash, location.search, document.URL, document.referrer, window.name.
-3. Search for SINKS: innerHTML, document.write, eval(), setTimeout(string), jQuery .html().
-4. If a source feeds directly into a sink without DOMPurify sanitization, construct a trigger URL.
-5. Use active_payload_tester to send the trigger URL. If "reflected": false but the flow exists, it's DOM XSS.''',
-    expected_output="List of DOM XSS vulnerabilities with source, sink, code flow, and trigger URL.",
+1. Use fetch_site_data on EACH page with parameters to get the full HTML and JavaScript (returned in the "body" field).
+2. Read the "body" field and search the actual JavaScript code for SOURCES: location.hash, location.search, document.URL, document.referrer, window.name.
+3. Search the actual JavaScript code for SINKS: innerHTML, document.write, eval(), setTimeout(string), jQuery .html().
+4. If a source feeds directly into a sink without DOMPurify sanitization, cite the exact JavaScript code line and construct a trigger URL.
+5. Use active_payload_tester to send the trigger URL. If "reflected": false but the source-to-sink flow exists in the code, it's DOM XSS.
+6. You MUST cite the actual JavaScript code from the body that shows the vulnerable flow. Do NOT guess or assume.''',
+    expected_output="List of DOM XSS vulnerabilities with cited source code, source, sink, code flow, and trigger URL.",
     agent=dom_xss_agent,
     context=[recon_task]
 )
