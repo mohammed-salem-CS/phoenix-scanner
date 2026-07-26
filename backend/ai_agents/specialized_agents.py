@@ -123,9 +123,30 @@ def _init_session():
     SESSION_COOKIE_STR = "; ".join(f"{k}={v}" for k, v in SESSION_COOKIES.items())
 
 
-def get_auth_headers():
-    """Return dict with Cookie header if session is active, else empty dict."""
-    if SESSION_COOKIE_STR:
+def _get_target_host():
+    """Return the hostname of the scan target (sys.argv[1]) for credential scoping."""
+    if len(sys.argv) >= 2:
+        from urllib.parse import urlparse
+        parsed = urlparse(sys.argv[1])
+        return parsed.hostname or ""
+    return ""
+
+
+def _is_target_url(url: str) -> bool:
+    """Check if url belongs to the configured scan target's host."""
+    from urllib.parse import urlparse
+    target_host = _get_target_host()
+    if not target_host:
+        return False
+    parsed = urlparse(url)
+    request_host = parsed.hostname or ""
+    return request_host == target_host
+
+
+def get_auth_headers(url: str = "") -> dict:
+    """Return dict with Cookie header only if url belongs to the scan target host.
+    Credentials are never sent to third-party domains to prevent credential leakage."""
+    if SESSION_COOKIE_STR and (not url or _is_target_url(url)):
         return {"Cookie": SESSION_COOKIE_STR, "User-Agent": "Phoenix-AI"}
     return {"User-Agent": "Phoenix-AI"}
 
@@ -253,7 +274,7 @@ def historical_urls(domain: str) -> str:
 def fetch_site_data(url: str) -> str:
     """Extracts HTML forms, inputs, basic metadata, AND the page HTML body (for JavaScript source-to-sink analysis)."""
     try:
-        res = requests.get(url, timeout=10, verify=False, headers=get_auth_headers())
+        res = requests.get(url, timeout=10, verify=False, headers=get_auth_headers(url))
         soup = BeautifulSoup(res.text, 'html.parser')
         forms = [{"action": f.get('action'), "method": f.get('method', 'GET').upper(), "inputs": [i.get('name') for i in f.find_all('input') if i.get('name')]} for f in soup.find_all('form')]
         # Include truncated body so DOM XSS agent can analyze JavaScript source-to-sink flows
@@ -419,7 +440,8 @@ def interactsh_ssrf_test(url: str, parameter: str) -> str:
         payload_url = f"http://{callback_url}"
         try:
             sep = "&" if "?" in url else "?"
-            requests.get(f"{url}{sep}{parameter}={payload_url}", timeout=10, verify=False, headers=get_auth_headers())
+            inject_url = f"{url}{sep}{parameter}={payload_url}"
+            requests.get(inject_url, timeout=10, verify=False, headers=get_auth_headers(inject_url))
         except: pass
 
         # Wait briefly for any server-side callback to arrive
@@ -487,7 +509,7 @@ def active_payload_tester(url: str, method: str, parameter: str, payload: str) -
     try:
         time.sleep(0.5)
         params = {parameter: payload}
-        hdrs = get_auth_headers()
+        hdrs = get_auth_headers(url)
         start_time = time.time()
         if method.upper() == "POST":
             res = requests.post(url, data=params, timeout=10, verify=False, headers=hdrs, allow_redirects=False)
